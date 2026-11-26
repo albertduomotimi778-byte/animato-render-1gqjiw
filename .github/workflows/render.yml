@@ -1,4 +1,4 @@
-# animato-render-pipeline v2
+# animato-render-pipeline v3
 # Made by Animato Stickman Studio. Builds the video for one job (a branch called job-<id>) and saves the encrypted video as an artifact
 # that is kept for one day. Nothing here runs unless the app starts it for a real job: there is no schedule and no retry.
 name: render
@@ -42,16 +42,19 @@ jobs:
           N=$(gh api "repos/${{ github.repository }}/actions/workflows/render.yml/runs?created=%3E%3D$SINCE&per_page=100" --jq '.total_count')
           echo "runs in the last 24 hours: $N"
           if [ "$N" -gt 3 ]; then echo "Daily limit reached"; exit 1; fi
+          SINCE5=$(date -u -d '4 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          M=$(gh api "repos/${{ github.repository }}/actions/workflows/render.yml/runs?created=%3E%3D$SINCE5&per_page=100" --jq '.total_count')
+          if [ "$M" -gt 1 ]; then echo "Please wait a few minutes between renders"; exit 1; fi
       - id: plan
         run: node tools/plan.mjs jobdata/job/meta.json
 
   render:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     strategy:
       fail-fast: true
-      max-parallel: 6
+      max-parallel: 10
       matrix:
         part: ${{ fromJson(needs.plan.outputs.parts) }}
     steps:
@@ -65,8 +68,8 @@ jobs:
           node-version: 22
       - name: Install
         run: |
-          sudo apt-get update -y && sudo apt-get install -y ffmpeg
-          npm install --no-audit --no-fund
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          npm install --no-audit --no-fund --loglevel=error
       - name: Draw part ${{ matrix.part }}
         env:
           CHROME_PATH: /usr/bin/google-chrome
@@ -82,7 +85,7 @@ jobs:
   join:
     needs: render
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
