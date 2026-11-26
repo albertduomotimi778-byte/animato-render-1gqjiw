@@ -134,7 +134,7 @@ if(framed)post({type:"stickman:ready"});
 <meta property="og:title" content="Animato Stickman Studio">
 <meta property="og:description" content="Professional YouTube 16:9 stickman and animation generator with AI scene creation and audio sync.">
 <meta name="theme-color" content="#090b10">
-<script type="module">import * as Sync from '/sync.js';import * as Gen from '/generation.js';import * as CharUtils from '/character-builder-utils.js';import * as TranscribeAlign from '/transcribe-align.js';import * as Transcriber from '/transcriber-client.js';import * as CharEngine from '/character-engine.js';import * as CharStyles from '/character-styles.js';import * as BgMode from '/background-mode.js';import * as SendToAi from '/send-to-ai.js';import * as Motion from '/motion-polish.js';window.AnimatoMotion=Motion;import * as Face from '/expressions.js';window.AnimatoFace=Face;import * as Acting from '/acting.js';window.AnimatoActing=Acting;import * as Gaze from '/gaze.js';window.AnimatoGaze=Gaze;import * as PStage from '/portrait-stage.js';import * as CastId from '/cast-identity.js';import * as NounIcons from '/noun-icons.js';import * as Depth from '/depth.js';import * as Scenery from '/scenery.js';window.AnimatoPStage=PStage;window.AnimatoCast=CastId;window.AnimatoNouns=NounIcons;window.AnimatoDepth=Depth;window.AnimatoScenery=Scenery;import * as Director from '/director.js';window.AnimatoDirector=Director;import * as Shots from '/shots.js';window.AnimatoShots=Shots;import * as Engage from '/engage.js';window.AnimatoEngage=Engage;import * as CharPack from '/character-pack.js';window.AnimatoCharPack=CharPack;import * as CharIK from '/character-ik.js';window.AnimatoIK=CharIK;import * as MyBg from '/my-backgrounds.js';import * as Alive from '/liveliness.js';import * as Cinema from '/cinema.js';import * as PartsGuide from '/parts-guide.js';import * as CT from '/content-types.js';import * as PM from '/projects.js';window.AnimatoPM=PM;window.AnimatoCT=CT;window.AnimatoAlive=Alive;window.AnimatoCinema=Cinema;window.AnimatoParts=PartsGuide;window.AnimatoMyBg=MyBg;import * as PhotoTags from '/photo-tags.js';import * as PhotoStore from '/photo-store.js';import * as Team from '/production-team.js';window.AnimatoTeam=Team;window.AnimatoPhotoTags=PhotoTags;window.AnimatoPhotos=PhotoStore;window.AnimatoBg=BgMode;window.AnimatoSend=SendToAi;window.AnimatoCharStyles=CharStyles;window.AnimatoSync=Sync;window.AnimatoGen=Gen;window.AnimatoCharUtils=CharUtils;window.AnimatoTranscribeAlign=TranscribeAlign;window.AnimatoTranscriber=Transcriber;window.AnimatoCharEngine=Object.assign({},CharEngine,{formatCharacterDnaPrompt:(dna,style,hint)=>CharStyles.isNewStyle(style)?CharStyles.styleDirective(style):CharEngine.formatCharacterDnaPrompt(dna,style,hint)});import('/ai-sync.js').then(m=>{window.AnimatoAiSync=m;window.dispatchEvent(new Event('animato:ai-sync-ready'))}).catch(()=>{});import('/character-light.js').then(m=>{window.AnimatoLight=m}).catch(()=>{});import('/character-guard.js').then(m=>{window.AnimatoCharGuard=m;window.dispatchEvent(new Event('animato:char-guard-ready'))}).catch(()=>{});window.dispatchEvent(new Event('animato:char-engine-ready'));window.dispatchEvent(new Event('animato:bg-ready'));</script>
+<script type="module">import * as Sync from '/sync.js';import * as Gen from '/generation.js';import * as CharUtils from '/character-builder-utils.js';import * as TranscribeAlign from '/transcribe-align.js';import * as Transcriber from '/transcriber-client.js';import * as CharEngine from '/character-engine.js';import * as CharStyles from '/character-styles.js';import * as BgMode from '/background-mode.js';import * as SendToAi from '/send-to-ai.js';import * as Motion from '/motion-polish.js';window.AnimatoMotion=Motion;import * as Face from '/expressions.js';window.AnimatoFace=Face;import * as Acting from '/acting.js';window.AnimatoActing=Acting;import * as Gaze from '/gaze.js';window.AnimatoGaze=Gaze;import * as PStage from '/portrait-stage.js';import * as CastId from '/cast-identity.js';import * as NounIcons from '/noun-icons.js';import * as Depth from '/depth.js';import * as SvgSafe from '/svg-safe.js';window.AnimatoSvgSafe=SvgSafe;import * as Scenery from '/scenery.js';window.AnimatoPStage=PStage;window.AnimatoCast=CastId;window.AnimatoNouns=NounIcons;window.AnimatoDepth=Depth;window.AnimatoScenery=Scenery;import * as Director from '/director.js';window.AnimatoDirector=Director;import * as Shots from '/shots.js';window.AnimatoShots=Shots;import * as Engage from '/engage.js';window.AnimatoEngage=Engage;import * as CharPack from '/character-pack.js';window.AnimatoCharPack=CharPack;import * as CharIK from '/character-ik.js';window.AnimatoIK=CharIK;import * as MyBg from '/my-backgrounds.js';import * as Alive from '/liveliness.js';import * as Cinema from '/cinema.js';import * as PartsGuide from '/parts-guide.js';import * as CT from '/content-types.js';import * as PM from '/projects.js';window.AnimatoPM=PM;window.AnimatoCT=CT;window.AnimatoAlive=Alive;window.AnimatoCinema=Cinema;window.AnimatoParts=PartsGuide;window.AnimatoMyBg=MyBg;import * as PhotoTags from '/photo-tags.js';import * as PhotoStore from '/photo-store.js';import * as Team from '/production-team.js';window.AnimatoTeam=Team;window.AnimatoPhotoTags=PhotoTags;window.AnimatoPhotos=PhotoStore;window.AnimatoBg=BgMode;window.AnimatoSend=SendToAi;window.AnimatoCharStyles=CharStyles;window.AnimatoSync=Sync;window.AnimatoGen=Gen;window.AnimatoCharUtils=CharUtils;window.AnimatoTranscribeAlign=TranscribeAlign;window.AnimatoTranscriber=Transcriber;window.AnimatoCharEngine=Object.assign({},CharEngine,{formatCharacterDnaPrompt:(dna,style,hint)=>CharStyles.isNewStyle(style)?CharStyles.styleDirective(style):CharEngine.formatCharacterDnaPrompt(dna,style,hint)});import('/ai-sync.js').then(m=>{window.AnimatoAiSync=m;window.dispatchEvent(new Event('animato:ai-sync-ready'))}).catch(()=>{});import('/character-light.js').then(m=>{window.AnimatoLight=m}).catch(()=>{});import('/character-guard.js').then(m=>{window.AnimatoCharGuard=m;window.dispatchEvent(new Event('animato:char-guard-ready'))}).catch(()=>{});window.dispatchEvent(new Event('animato:char-engine-ready'));window.dispatchEvent(new Event('animato:bg-ready'));</script>
 <style>:root{color-scheme:dark;--bg:#15171c;--fg:#e4e6eb;--mu:#98a0ad;--card:#1d2027;--card2:#242831;--line:#2e333d;--line2:#3d4350;--ac:#4f8cff;--acf:#fff;--wash:#12141a;--err:#f2897f;--ok:#6fcf97;--sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 :root[data-theme="light"]{color-scheme:light;--bg:#f2f3f5;--fg:#1c1f26;--mu:#5d6572;--card:#fff;--card2:#f6f7f9;--line:#dcdfe4;--line2:#c3c8d0;--ac:#1f5fd1;--acf:#fff;--wash:#eceef1;--err:#b3261e;--ok:#217a44}
 html{scroll-padding-top:env(safe-area-inset-top,0px);background:var(--bg)}
@@ -3863,8 +3863,8 @@ const CP_KEYS=['headBehind','headBehindSide','head','torso','upperArm','foreArm'
 const CP_RIG={upperLeg:150,lowerLeg:150,torso:190,shoulderX:58,shoulderDown:25,hipX:32,upperArm:105,foreArm:100};
 /* LINE ART POLISH: every outline the AI draws (uploaded characters, its own sets and objects) gets round joins and round ends, so corners and
    line ends look hand-inked instead of jagged mitres and square stubs. Only shapes that do not set their own joins are touched. */
-const LA_RE=/<(path|polyline|polygon|line|rect|ellipse|circle)\b(?![^>]*stroke-linejoin)/g;
-function lineArt(x){return typeof x==='string'&&x.length<600000&&x.indexOf('stroke')>=0?x.replace(LA_RE,'<$1 stroke-linejoin="round" stroke-linecap="round"'):x}
+const LA_RE=/<(path|polyline|polygon|line|rect|ellipse|circle)\b(?![^>]*stroke-linejoin)([^>]*)/g;
+function lineArt(x){if(!(typeof x==='string'&&x.length<600000&&x.indexOf('stroke')>=0))return x;const S=window.AnimatoSvgSafe;return S?S.roundLineEnds(x,LA_RE):x.replace(/<(path|polyline|polygon|line|rect|ellipse|circle)\b(?![^>]*stroke-linejoin)(?![^>]*stroke-linecap)/g,'<$1 stroke-linejoin="round" stroke-linecap="round"')}
 function cpClean(svg,pre){if(typeof svg!=='string'||!svg.trim())return '';
  /* links to a shape in the same piece (a gradient borrowing another gradient's colours: href="#base") are kept; every other link is switched off by cleanSvg */
  let x=svg.slice(0,40000).replace(/(\s)(?:xlink:)?href(\s*=\s*["'])#/gi,'$1KEEPHREF$2#').replace(/url\(\s*(?:&quot;|["'])?\s*#([^)"'&\s]+)\s*(?:&quot;|["'])?\s*\)/gi,'url(#$1)');
@@ -5602,7 +5602,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 /* Loads a module from the first address that works. warmEncoder() below needs it for the MP4 muxer; without it the exporter silently fell back to real-time recording. */
 async function imp(urls){let last;for(const u of urls){try{return await import(/* @vite-ignore */u)}catch(e){last=e}}throw last||new Error('could not load module')}
 const expName=()=>(($('#ptitle').textContent||'scene').replace(/[^\w]+/g,'-').replace(/^-|-$/g,'')||'scene');
-function svgToImg(svg){return new Promise((res,rej)=>{const u=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'})),im=new Image();im.onload=async()=>{try{if(im.decode)await im.decode()}catch(e){}URL.revokeObjectURL(u);res(im)};im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('frame render failed'))};im.src=u})}
+function svgToImg(svg,fixed){return new Promise((res,rej)=>{const u=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'})),im=new Image();im.onload=async()=>{try{if(im.decode)await im.decode()}catch(e){}URL.revokeObjectURL(u);res(im)};
+ /* the picture was refused (usually a tag that repeats an attribute): clean it once and try again before giving up on the frame */
+ im.onerror=()=>{URL.revokeObjectURL(u);const S=window.AnimatoSvgSafe,f=S&&!fixed?S.fixDuplicateAttributes(svg):svg;if(f!==svg)svgToImg(f,true).then(res,rej);else rej(new Error('frame render failed'))};im.src=u})}
 /* ---- Video settings: resolution + frame rate chosen by the person (logic lives in /video-settings.js).
    VSET always holds a valid choice; the defaults are Full HD at 30 fps (the person's own saved choice always wins). ---- */
 let VSET={width:1920,height:1080,fps:30,fit:'fit'},VSM=null,VS_BUSY=false,VS_AR='16:9';
@@ -5898,18 +5900,24 @@ function ghUI(msg,prog,btn){const s=$('#ghst'),p=$('#ghbar'),b=$('#expGh');if(!s
 async function ghParent(type,extra,reply,ms){const par=window.__EMBED&&window.__EMBED.allowed&&window.__EMBED.parent;if(!par||window.parent===window)return null;
  return new Promise(res=>{const h=e=>{if(e.origin!==par||!e.data||e.data.type!==reply)return;removeEventListener('message',h);clearTimeout(tm);res(e.data)};const tm=setTimeout(()=>{removeEventListener('message',h);res(null)},ms||2500);addEventListener('message',h);try{window.parent.postMessage(Object.assign({type},extra||{}),par)}catch(x){removeEventListener('message',h);clearTimeout(tm);res(null)}})}
 const GH_EMB=()=>!!(window.__EMBED&&window.__EMBED.allowed&&window.__EMBED.parent)&&window.parent!==window;
-async function ghToken(force,note){
- let t=force?'':lsGet(GH_TOK,'');if(t)return t;
- if(GH_EMB()){
-  /* Inside Animato Studio Pro the token ALWAYS comes from Animato (the person is never asked to paste one). */
-  let r=null;for(let i=0;i<3&&!(r&&r.token);i++){r=await ghParent('stickman:github-token-request',null,'animato:github-token',5000);if(r&&(r.token||r.needScope||r.reason==='signedout'))break}
-  if(r&&r.token){t=String(r.token);lsSet(GH_TOK,t);return t}
+/* Inside Animato the token is never kept: every render asks Animato for a fresh one, so an expired sign-in can not be reused.
+   `rejected` is the token GitHub just refused; if Animato hands the same one back, the person is told to sign in to Animato again. */
+async function ghToken(force,note,rejected){
+ const emb=GH_EMB();
+ let t=(force||emb)?'':lsGet(GH_TOK,'');if(t)return t;
+ if(emb){
+  let r=null;for(let i=0;i<3&&!(r&&r.token&&String(r.token)!==rejected);i++){r=await ghParent('stickman:github-token-request',{fresh:true,refresh:true,rejected:!!rejected,rejectedTail:rejected?String(rejected).slice(-6):''},'animato:github-token',6000);if(r&&((r.token&&String(r.token)!==rejected)||r.needScope||r.reason==='signedout'))break;await ghSleep(600)}
+  if(r&&r.token&&String(r.token)!==rejected){t=String(r.token);lsSet(GH_TOK,t);return t}
+  lsSet(GH_TOK,null);
+  if(r&&r.token)throw new Error('GitHub no longer accepts the sign-in Animato gave. Sign out of Animato Studio Pro, sign in with GitHub again, then tap Render on GitHub.');
   if(r&&r.needScope)throw new Error('Allow GitHub in the Animato message, then tap Render on GitHub again.');
   if(r&&r.reason==='signedout')throw new Error('Sign in to Animato Studio Pro first, then tap Render on GitHub again.');
   if(r&&r.v)throw new Error('Animato could not reach GitHub details right now. Check your connection and try again.');
   throw new Error(r?'Animato Studio Pro is not updated yet: it needs the new version that passes GitHub details to this tool.':'Animato did not answer. Close and reopen Code to stickman from Animato Studio Pro, then try again.')}
  t=await askGithubToken(note||'');
  if(t)lsSet(GH_TOK,t);return t}
+/* Every GitHub call that is refused with 401 (also in the middle of a long render) gets one fresh token and is repeated. */
+function ghApiFor(M,tok){const api=new M.a.GhApi(tok);api.refresh=async old=>{lsSet(GH_TOK,null);return await ghToken(true,'That token did not work. Make a new one.',old)};return api}
 const ghSleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function ghFetchApp(){const list=await (await fetch('/render-files.json',{cache:'no-store'})).json(),out=[];let h=5381,n=0;
  for(const f of list){const u=new Uint8Array(await (await fetch('/'+f,{cache:'no-store'})).arrayBuffer());out.push({path:'app/'+f,u});n+=u.length;for(let i=0;i<u.length;i+=97)h=((h*33)^u[i])>>>0}
@@ -5939,8 +5947,7 @@ async function ghStart(){
  GHBUSY=true;ghUI('Connecting…',.02);
  try{
   let tok=await ghToken(false);if(!tok){GHBUSY=false;ghUI('');return}
-  let api=new M.a.GhApi(tok),user;
-  try{user=await api.user()}catch(e){if(e.code!=='auth')throw e;lsSet(GH_TOK,null);tok=await ghToken(true,'That token did not work. Make a new one.');if(!tok)throw new Error('Not connected');api=new M.a.GhApi(tok);user=await api.user()}
+  let api=ghApiFor(M,tok),user=await api.user();
   {const g=await ghParent('stickman:github-job-request',{id:'r'+Date.now()},'animato:github-job',3000);if(g&&g.allowed===false)throw new Error('You have used today\'s GitHub renders. Try again tomorrow, or render on this device.')}
   const{name,main}=await ghEnsureRepo(api,M,user),id=M.a.jobId(),FPS=EXP.FPS,rate=M.a.audioRateFor(sec);
   ghUI('Sending your video…',.25);
@@ -5984,7 +5991,7 @@ async function ghWatch(api,M,st){
  }catch(e){GHBUSY=false;ghUI('GitHub render stopped: '+(e&&e.message||e));if(/did not finish|did not start/.test(e&&e.message||'')){lsSet(GH_JOB,null);try{await api.deleteBranch(st.owner,st.repo,M.a.branchOf(st.id))}catch(x){}}}}
 async function ghResume(){const raw=lsGet(GH_JOB,'');if(!raw)return;let st;try{st=JSON.parse(raw)}catch(e){lsSet(GH_JOB,null);return}
  if(Date.now()-st.t>36e5*30){lsSet(GH_JOB,null);return}
- const tok=lsGet(GH_TOK,'');if(!tok)return;const M=await ghMods();ghWatch(new M.a.GhApi(tok),M,st)}
+ let tok=lsGet(GH_TOK,'');if(!tok&&GH_EMB()){try{tok=await ghToken(false)}catch(e){return}}if(!tok)return;const M=await ghMods();ghWatch(ghApiFor(M,tok),M,st)}
 function initGhRender(){const b=$('#expGh');if(!b)return;
  b.onclick=()=>{if(GHV){saveVideo(GHV);return}ghStart()};
  setInterval(()=>{if(!GHBUSY&&!GHV)ghUI(null,null)},1500);setTimeout(ghResume,1200)}

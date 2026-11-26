@@ -158,6 +158,11 @@ export class GhApi {
     if (method !== 'GET') { const wait = (this.lastWrite || 0) + (this.gap == null ? 350 : this.gap) - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); this.lastWrite = Date.now(); }
     try { return await this.req1(method, path, body, opts); }
     catch (e) {
+      /* GitHub said 401: ask for a fresh sign-in once (the app gets it from Animato), then repeat this same call */
+      if (e.code === 'auth' && !opts._authRetried && typeof this.refresh === 'function') {
+        let t = null; try { t = await this.refresh(this.token); } catch (x) { /* no new token */ }
+        if (t && t !== this.token) { this.token = t; return this.req(method, path, body, Object.assign({}, opts, { _authRetried: true })); }
+      }
       if (e.code === 'rate' && !opts._retried && (e.retryAfter || 0) <= 90) { await new Promise((r) => setTimeout(r, Math.max(2, e.retryAfter || 30) * 1000)); return this.req(method, path, body, Object.assign({}, opts, { _retried: true })); }
       throw e;
     }
