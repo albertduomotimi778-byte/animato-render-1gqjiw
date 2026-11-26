@@ -132,4 +132,48 @@ export function frameGroup(cam, group) {
   return { z, cx };
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// BODY ALWAYS SHOWS: a shot may never zoom in until only a hand (or a nose) fills the tall frame.
+// ---------------------------------------------------------------------------------------------------------
+export const BODY_H = 598;            // a person stands about this tall at scale 1 (every style, measured)
+export const MIN_BODY_SHOWN = .6;     // the tall frame always shows at least this share of the person's height (about head to hip)
+export const WORLD_H = 900;
+
+/**
+ * The most the 9:16 camera may zoom, given the people in the picture (their drawn scales). The bigger the person is drawn, the less
+ * the camera may zoom, so the same share of the body is always visible. The person the camera is near decides (default: the biggest).
+ */
+export function bodyZoomCap(people, cx) {
+  const L = (people || []).filter((p) => p && p.s > 0);
+  if (!L.length) return 4.2;
+  let m = L[0];
+  if (cx != null && isFinite(cx)) L.forEach((p) => { if (Math.abs(p.x - cx) < Math.abs(m.x - cx) - 1e-6) m = p; });
+  else L.forEach((p) => { if (p.s > m.s) m = p; });
+  return Math.max(1, Math.min(4.2, WORLD_H / (MIN_BODY_SHOWN * BODY_H * m.s)));
+}
+
+/** When the zoom was held back, slide the camera from the face/hand it aimed at toward the middle of the body, so the head or the feet
+ *  are not left half out of the picture. `k` = how much of the asked zoom was taken away (0..1). */
+export function bodyCentreY(cy, zWanted, zCap, person) {
+  if (!person || zWanted <= zCap + 1e-6) return cy;
+  const k = Math.min(.6, 1 - zCap / zWanted), mid = person.gy - BODY_H * person.s * .55;
+  return cy + (mid - cy) * k;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// DEPTH PARALLAX: the far background follows the camera a little less than the people do.
+// ---------------------------------------------------------------------------------------------------------
+export const PAR_PAN = .28;           // the backdrop slides 28% less than the world when the camera pans
+export const PAR_ZOOM = .06;          // ... and zooms 6% less when the camera pushes in
+export const PAR_BACK_ROW = .05;      // the back row of a crowd drifts a hair less than the front row
+
+/** Transform of the BACKDROP layer for camera c = {x, y, z, r} on a stage FW wide. Pure, so preview and export agree. */
+export function backdropCamera(c, FW) {
+  const hw = FW / 2, z = Math.max(1, +c.z || 1), zb = 1 + (z - 1) * (1 - PAR_ZOOM);
+  const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+  const x = cl(800 + ((+c.x || 800) - 800) * (1 - PAR_PAN), Math.min(hw / zb, 800), Math.max(1600 - hw / zb, 800));
+  const y = cl(+c.y || 450, 450 / zb, 900 - 450 / zb);
+  return { x, y, z: zb, r: +c.r || 0 };
+}
+
 export const PORTRAIT_STAGE_MARKER = 'PORTRAIT ROOM TO BREATHE';

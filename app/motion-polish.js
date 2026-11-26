@@ -376,13 +376,14 @@ export function lipAtWord(words, pos) {
   if (u <= keys[0].c) { a = b = keys[0]; }
   else if (u >= keys[keys.length - 1].c) { a = b = keys[keys.length - 1]; }
   else { for (let i = 1; i < keys.length; i++) if (u <= keys[i].c) { a = keys[i - 1]; b = keys[i]; break; } }
-  let m, dom;
-  if (a === b) { m = shapeOf(a); dom = nameOf(a); }
-  else { const k = smooth(0, 1, (u - a.c) / Math.max(1e-6, b.c - a.c)); m = blendMouth(shapeOf(a), shapeOf(b), k); dom = k < .5 ? nameOf(a) : nameOf(b); }
+  let m, dom, va, vb, kk = 0;
+  if (a === b) { m = shapeOf(a); dom = va = vb = nameOf(a); }
+  else { kk = smooth(0, 1, (u - a.c) / Math.max(1e-6, b.c - a.c)); m = blendMouth(shapeOf(a), shapeOf(b), kk); va = nameOf(a); vb = nameOf(b); dom = kk < .5 ? va : vb; }
   // end of a word: the lips close a little before the next one
   const tail = smooth(.82, 1, u);
   if (tail > 0) m = blendMouth(m, { ...MOUTH.REST, open: Math.min(m.open, .18) }, tail * .55);
-  return { v: dom, m };
+  // va -> vb is the glide in progress (kk 0..1): drawn characters with a set of mouth drawings dissolve from one to the other instead of flashing
+  return { v: dom, m, va, vb, k: kk };
 }
 
 /**
@@ -438,7 +439,7 @@ export function lipAt(wp, env, t, phase = 0) {
     // the voice level shapes how far the jaw opens; stressed syllables open wider
     const gain = loud == null ? 1 : cl(.55 + loud * 1.05, .5, 1.25);
     const m = { ...r.m, open: cl(r.m.open * gain, 0, 1) };
-    return { v: r.v, m, open: m.open };
+    return { v: r.v, va: r.va, vb: r.vb, k: r.k, m, open: m.open };
   }
   if (wp && wp.silent) return { v: 'REST', m: MOUTH.REST, open: 0 };
   // no words known: chatter that still follows the voice level
@@ -449,7 +450,7 @@ export function lipAt(wp, env, t, phase = 0) {
   const m = blendMouth(MOUTH[a], MOUTH[b], k);
   const gain = loud == null ? 1 : cl(.4 + loud * 1.2, .3, 1.3);
   const mm = { ...m, open: cl(m.open * gain, 0, 1) };
-  return { v: k < .5 ? a : b, m: mm, open: mm.open };
+  return { v: k < .5 ? a : b, va: a, vb: b, k, m: mm, open: mm.open };
 }
 
 // The mouth the renderers read. computeFrame sets it just before it draws a talking character and clears it right after.

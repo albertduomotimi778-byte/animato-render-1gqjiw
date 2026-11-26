@@ -1,6 +1,8 @@
 import { STYLE_API_RULE, STYLE_CAST_EXAMPLE } from './character-styles.js';
 import { isAction, busyWindows, ACTION_NAMES } from './acting.js';
 import { autoProps } from './scenery.js';
+import { anchorBeat } from './shots.js';
+import { creatureSvg, creatureKind } from './creatures.js';
 // Pure AI model ranking, free-tier filtering, downward fallback, and duration-locked
 // multi-chapter generation utilities for Animato Stickman Studio.
 // Works both in browsers (as an ES module attached to window.AnimatoGen) and in Node.js.
@@ -3797,6 +3799,39 @@ function resolveCompactProps(rawProps, mood, isBlackBg, setKey, dur, env, opts =
       } else {
         out.push({ svg: logoSvg, x, y, scale: 1, animate: () => ({ opacity: 1 }) });
       }
+    } else if (kind === 'animal' || kind === 'creature' || kind === 'pet') {
+      // an animal the app draws and animates itself (public/creatures.js): ['animal','dog',x,ground,scale,t0,'run',{to, t2, chase, dx, bark, color, t1}]
+      const extra = trailingOpts(itemSpec, 3);
+      const [, who = 'dog', x0 = 1100, gy = 800, scale = 1, t0n = 0, motion = 'idle'] = itemSpec;
+      const ck = creatureKind(who) || 'dog';
+      const t0 = Number.isFinite(+t0n) ? +t0n : 0;
+      const t1 = Number.isFinite(+extra.t1) ? +extra.t1 : 999;
+      let m = String(typeof motion === 'string' ? motion : extra.gait || 'idle').toLowerCase();
+      if (m === 'chase') m = 'run';
+      const chase = extra.chase || extra.follow || '';
+      const fdx = Number(extra.dx ?? (chase ? -300 : 0));
+      let to = Array.isArray(extra.to) ? Number(extra.to[0]) : Number.isFinite(+extra.to) ? +extra.to : null;
+      const moving = m === 'walk' || m === 'run';
+      if (to === null && moving && !chase) to = Number(x0) + (Number(x0) > 800 ? -1 : 1) * (m === 'run' ? 900 : 520);
+      const t2 = Number.isFinite(+extra.t2) ? +extra.t2 : t0 + (to !== null ? Math.max(1.2, Math.abs(to - x0) / (m === 'run' ? 520 : 220)) : 0);
+      const facing = extra.face === 'left' || extra.facing === -1 ? -1 : extra.face === 'right' || extra.facing === 1 ? 1 : chase ? (extra.near ? (fdx < 0 ? 1 : -1) : (fdx < 0 ? 1 : -1)) : to !== null ? (to >= x0 ? 1 : -1) : (Number(x0) > 800 ? -1 : 1);
+      const barks = (Array.isArray(extra.bark) ? extra.bark : extra.bark !== undefined ? [extra.bark] : []).map(Number).filter(Number.isFinite);
+      const ez = (u) => { u = Math.max(0, Math.min(1, u)); return u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; };
+      const gaitAt = (t) => {
+        if (barks.some((b) => t >= b && t < b + .9)) return 'bark';
+        if (chase && !extra.near) return m === 'idle' ? 'run' : m;
+        if (to !== null && t >= t0 && t < t2) return m === 'idle' ? 'walk' : m;
+        if (to !== null) return extra.then || 'idle';
+        return m;
+      };
+      const seed = String(who).length * 7 + Math.round(Number(x0) || 0);
+      pushItem({
+        svgFn: (t) => creatureSvg(ck, { t: t + seed * .37, gait: gaitAt(t), facing, color: extra.color, belly: extra.belly, seed, mood: extra.mood }),
+        x: Number(x0), y: Number(gy) || 800, scale: Number(scale) || 1, layer: extra.layer || 'front', _creature: ck, _who: extra.id || ck,
+        ...(chase ? { follow: String(chase), fdx, fdy: Number(extra.dy ?? 0), leash: '', flipWith: false } : {}),
+        ...(t0 > 0 || t1 < 900 ? { show: [Math.max(0, t0 - .02), t1] } : {}),
+        animate: (t) => ({ x: to !== null && !chase ? (to - x0) * ez((t - t0) / Math.max(.2, t2 - t0)) : 0, opacity: t1 < 900 ? Math.max(0, Math.min(1, (t1 - t) / .2)) : 1 }),
+      });
     } else if (kind === 'svg') {
       const extra = trailingOpts(itemSpec, 3);
       const [, keyOrSvg, x = 800, y = 500, scale = 1, t0 = 0.25, motion = 'float', maybeT1] = itemSpec;
@@ -3809,8 +3844,10 @@ function resolveCompactProps(rawProps, mood, isBlackBg, setKey, dur, env, opts =
         x,
         y,
         scale,
+        // hold:'amara' = in her hand, wear:'amara' (+ at:'waist'|'head'|'back'|'shoulder'|'neck') = on her body; both move with her
+        ...((extra.hold || extra.wear) && !extra.follow ? { follow: String(extra.hold || extra.wear), fat: String(extra.at || (extra.hold ? 'hand' : 'waist')), fdx: Number(extra.dx ?? (extra.hold ? 55 : 0)), fdy: Number(extra.dy ?? 0), leash: '', flipWith: extra.flip !== false } : {}),
         ...(extra.follow ? { follow: String(extra.follow), fdx: Number(extra.dx ?? 150), fdy: Number(extra.dy ?? 0), leash: extra.leash ? (extra.leash === true ? '#3a2a1e' : String(extra.leash)) : '', leashAt: Array.isArray(extra.leashAt) ? extra.leashAt : [0, -60], flipWith: extra.flip !== false } : {}),
-        layer: extra.layer || (extra.follow ? 'front' : 'back'),
+        layer: extra.layer || (extra.follow || extra.hold || extra.wear ? 'front' : 'back'),
         ...(extra.par !== undefined ? { par: extra.par } : {}),
         ...(extra.screen !== undefined ? { screen: extra.screen } : {}),
         ...(t1 < 900 || t0 > 0 ? { show: [Math.max(0, t0 - 0.05), t1] } : {}),
@@ -3912,6 +3949,8 @@ const escXml = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 
 export function expandCompactBeat(spec = {}, env = {}, onEmitScene = null) {
   const s = spec && typeof spec === 'object' ? spec : {};
+  // word anchors: 'grab@"towel"', face:'calm@0->scared@"suddenly"', shot:'feet:hero@0->low:guard@"hefty"' become seconds (public/shots.js)
+  try { anchorBeat(s); } catch (e) { /* a malformed beat keeps its own times */ }
   const narration = typeof s.say === 'string' ? s.say : typeof s.narration === 'string' ? s.narration : '';
   const wordCount = narration.trim() ? narration.trim().split(/\s+/).length : 0;
   const rawDur = s.d ?? s.duration;
@@ -4118,6 +4157,7 @@ export function expandCompactBeat(spec = {}, env = {}, onEmitScene = null) {
   }
 
   const sceneObj = {
+    _autoScenery: true,
     name: s.n || s.name || undefined,
     duration,
     narration,
@@ -4133,6 +4173,13 @@ export function expandCompactBeat(spec = {}, env = {}, onEmitScene = null) {
     characters,
     captions,
   };
+  // named shots (shot:'feet:hero@0->tiltup:guard@1.4'): the director frames them on the people (public/shots.js, director.js)
+  const shotTrack = s.shot !== undefined ? s.shot : s.shots;
+  if (typeof shotTrack === 'string' ? shotTrack.trim() : Array.isArray(shotTrack) && shotTrack.length) sceneObj.shot = shotTrack;
+  if (s.grade) sceneObj.grade = s.grade;
+  if (isChapterCard) sceneObj.chapter = true;
+  // what is in the scene by name (the set, the drawings, the icons): the faces read it to fit the situation (no smiles in a fire)
+  try { sceneObj._things = [setKeyName].concat((Array.isArray(ownProps) ? ownProps : []).filter(Array.isArray).map((p) => (typeof p[1] === 'string' && p[1].length < 40 ? p[0] + ':' + p[1] : String(p[0])))).filter(Boolean); } catch (e) { /* only a hint */ }
 
   if (typeof onEmitScene === 'function') {
     onEmitScene(sceneObj);

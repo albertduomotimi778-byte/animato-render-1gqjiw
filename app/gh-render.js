@@ -12,8 +12,10 @@ export const CAPS = {
   perDay: 3,                  // renders in 24 hours
   secondsPerDay: 30 * 60,     // video minutes in 24 hours
   secondsPerMonth: 900 * 60,  // video minutes in 30 days (public repos use no one's free Actions minutes; this only keeps use sensible)
-  partSeconds: 180,           // each parallel piece is about 3 minutes of video
-  maxParallel: 6,
+  partSeconds: 120,           // each parallel piece is about 2 minutes of video
+  maxParts: 10,               // never more than 10 pieces at once (gentle on GitHub, still fast)
+  maxParallel: 10,
+  cooldownSec: 300,           // at least 5 minutes between two renders
   keepDays: 1,                // the finished video is kept 1 day, and removed as soon as it has been downloaded
 };
 export const REPO_PREFIX = 'animato-render-';
@@ -34,6 +36,8 @@ export function capCheck(usage, seconds, now = Date.now()) {
   const mins = (s) => Math.round(s / 60);
   if (sec <= 0) return { ok: false, reason: 'There is nothing to render yet.', usage: list };
   if (sec > CAPS.maxSeconds) return { ok: false, reason: 'GitHub rendering takes videos up to ' + mins(CAPS.maxSeconds) + ' minutes. This one is ' + mins(sec) + '. Render it on this device, or shorten it.', usage: list };
+  const last = list.reduce((m, u) => Math.max(m, u.t), 0);
+  if (last && now - last < CAPS.cooldownSec * 1000) return { ok: false, reason: 'Please wait ' + Math.ceil((CAPS.cooldownSec * 1000 - (now - last)) / 60000) + ' more minute(s) before the next GitHub render. This keeps your GitHub account in good standing.', usage: list };
   if (day.length >= CAPS.perDay) return { ok: false, reason: 'You have used your ' + CAPS.perDay + ' GitHub renders for today. Try again tomorrow, or render on this device.', usage: list };
   if (day.reduce((a, u) => a + u.sec, 0) + sec > CAPS.secondsPerDay) return { ok: false, reason: 'That would pass today\'s ' + mins(CAPS.secondsPerDay) + ' minutes of GitHub rendering. Try again tomorrow, or render on this device.', usage: list };
   if (list.reduce((a, u) => a + u.sec, 0) + sec > CAPS.secondsPerMonth) return { ok: false, reason: 'You have used this month\'s GitHub rendering (' + mins(CAPS.secondsPerMonth) + ' minutes). Render on this device, or try later.', usage: list };
@@ -53,9 +57,9 @@ export function repoNameFor(login, seed = '') {
   for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
   return REPO_PREFIX + h.toString(36).slice(0, 6).padStart(6, '0');
 }
-/** frames split into about-3-minute pieces, at most 99 */
+/** frames split into about-2-minute pieces, at most 10 (all drawn side by side) */
 export function partsFor(totalSec, partSec = CAPS.partSeconds) {
-  return Math.max(1, Math.min(99, Math.ceil((+totalSec || 0) / partSec)));
+  return Math.max(1, Math.min(CAPS.maxParts, Math.ceil((+totalSec || 0) / partSec)));
 }
 /** The narration is sent as raw 16-bit mono PCM in pieces, at the best rate that keeps the whole job small. */
 export function audioRateFor(seconds) {
@@ -149,7 +153,16 @@ export async function readZip(buf) {
 const API = 'https://api.github.com';
 export class GhApi {
   constructor(token, { fetch: f, base } = {}) { this.token = token; this.f = f || ((...a) => globalThis.fetch(...a)); this.base = base || API; }
-  async req(method, path, body, { raw = false, accept } = {}) {
+  /** Writes are paced (well under GitHub's limits) and a "slow down" answer is waited out once, as GitHub asks. */
+  async req(method, path, body, opts = {}) {
+    if (method !== 'GET') { const wait = (this.lastWrite || 0) + (this.gap == null ? 350 : this.gap) - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); this.lastWrite = Date.now(); }
+    try { return await this.req1(method, path, body, opts); }
+    catch (e) {
+      if (e.code === 'rate' && !opts._retried && (e.retryAfter || 0) <= 90) { await new Promise((r) => setTimeout(r, Math.max(2, e.retryAfter || 30) * 1000)); return this.req(method, path, body, Object.assign({}, opts, { _retried: true })); }
+      throw e;
+    }
+  }
+  async req1(method, path, body, { raw = false, accept } = {}) {
     const res = await this.f(this.base + path, {
       method,
       headers: Object.assign({ Authorization: 'Bearer ' + this.token, Accept: accept || 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -162,7 +175,7 @@ export class GhApi {
       if (res.status === 401) throw new GhError('GitHub did not accept the sign-in. Connect again.', 'auth', 401);
       if (res.status === 403 || res.status === 429) {
         const lim = /rate|abuse|secondary/i.test(m);
-        throw new GhError(lim ? 'GitHub asked us to slow down. Try again in a few minutes.' : 'GitHub refused this: ' + (m || 'no permission') + '.', lim ? 'rate' : 'forbidden', res.status);
+        const err = new GhError(lim ? 'GitHub asked us to slow down. Try again in a few minutes.' : 'GitHub refused this: ' + (m || 'no permission') + '.', lim ? 'rate' : 'forbidden', res.status); err.retryAfter = Number(res.headers && res.headers.get && res.headers.get('retry-after')) || 0; throw err;
       }
       if (res.status === 404) throw new GhError('GitHub could not find that (' + (m || path) + ').', 'notfound', 404);
       throw new GhError('GitHub said: ' + (m || res.status), 'error', res.status);
@@ -173,14 +186,16 @@ export class GhApi {
   async repoExists(owner, name) { try { return await this.req('GET', `/repos/${owner}/${name}`); } catch (e) { if (e.code === 'notfound') return null; throw e; } }
   createRepo(name) { return this.req('POST', '/user/repos', { name, private: false, auto_init: true, description: 'Video builds made with Animato Stickman Studio (encrypted)' }); }
   /** One commit that writes files [{path, b64}] onto a branch (created from the default branch when it is new). */
-  async pushFiles(owner, repo, branch, files, message, { fromBranch = 'main' } = {}) {
+  async pushFiles(owner, repo, branch, files, message, { fromBranch = 'main', onFile } = {}) {
     const R = `/repos/${owner}/${repo}`;
     let baseSha = null, parent = null;
     try { parent = (await this.req('GET', `${R}/git/ref/heads/${branch}`)).object.sha; baseSha = parent; } catch (e) { if (e.code !== 'notfound') throw e; }
     if (!baseSha) baseSha = (await this.req('GET', `${R}/git/ref/heads/${fromBranch}`)).object.sha;
     const baseCommit = await this.req('GET', `${R}/git/commits/${baseSha}`);
     const tree = [];
+    let n = 0;
     for (const f of files) {
+      if (onFile) onFile(n++, files.length);
       const b = await this.req('POST', `${R}/git/blobs`, { content: f.b64, encoding: 'base64' });
       tree.push({ path: f.path, mode: '100644', type: 'blob', sha: b.sha });
     }
@@ -198,6 +213,11 @@ export class GhApi {
   async findRun(owner, repo, id) {
     const j = await this.req('GET', `/repos/${owner}/${repo}/actions/runs?event=workflow_dispatch&per_page=20`);
     return (j.workflow_runs || []).find((r) => String(r.display_title || r.name || '').includes(id)) || null;
+  }
+  async activeRuns(owner, repo) {
+    const out = [];
+    for (const st of ['queued', 'in_progress']) out.push(...((await this.req('GET', `/repos/${owner}/${repo}/actions/runs?status=${st}&per_page=10`)).workflow_runs || []));
+    return out;
   }
   run(owner, repo, runId) { return this.req('GET', `/repos/${owner}/${repo}/actions/runs/${runId}`); }
   async artifacts(owner, repo, runId) { return (await this.req('GET', `/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`)).artifacts || []; }

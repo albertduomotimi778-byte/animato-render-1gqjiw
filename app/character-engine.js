@@ -741,8 +741,9 @@ function renderStickFaceEmo(o, E, hy, blk, talk, mo, ink, lx, rx, eyeY) {
   } else if (mf === 'oh') {
     mouth = `<ellipse cx="0" cy="${f(my + 4)}" rx="${f(7 + op * 6)}" ry="${f(6 + op * 14)}" fill="${dark}" stroke="${ink}" stroke-width="3.6"/>`;
   } else if (mf === 'scream') {
-    const h = 26 + op * 10;
-    mouth = `<path d="M-27,${f(my - 2)} Q0,${f(my - 9)} 27,${f(my - 2)} L21,${f(my + h)} Q0,${f(my + h + 8)} -21,${f(my + h)} Z" fill="${dark}" stroke="${ink}" stroke-width="3.8" stroke-linejoin="round"/><path d="M-23,${f(my - 2)} Q0,${f(my - 7)} 23,${f(my - 2)} L22,${f(my + 6)} Q0,${f(my + 1)} -22,${f(my + 6)} Z" fill="#ffffff"/><ellipse cx="0" cy="${f(my + h - 5)}" rx="10" ry="5" fill="#d9707a"/>`;
+    // a scream of fear: narrow at the top, wide at the bottom, the corners pulled down (it must never read as a laugh)
+    const h = 26 + op * 12;
+    mouth = `<path d="M-17,${f(my + 1)} Q0,${f(my - 3)} 17,${f(my + 1)} L25,${f(my + h)} Q0,${f(my + h + 9)} -25,${f(my + h)} Z" fill="${dark}" stroke="${ink}" stroke-width="3.8" stroke-linejoin="round"/><path d="M-15,${f(my + 1)} Q0,${f(my - 2)} 15,${f(my + 1)} L16,${f(my + 5)} Q0,${f(my + 3)} -16,${f(my + 5)} Z" fill="#ffffff"/><ellipse cx="0" cy="${f(my + h - 4)}" rx="9" ry="4" fill="#d9707a"/>`;
   } else if (mf === 'wail') {
     mouth = `<path d="M-22,${f(my + 14)} Q0,${f(my - 10)} 22,${f(my + 14)} Q12,${f(my + 22 + op * 6)} 0,${f(my + 22 + op * 6)} Q-12,${f(my + 22 + op * 6)} -22,${f(my + 14)} Z" fill="${dark}" stroke="${ink}" stroke-width="3.8" stroke-linejoin="round"/>`;
   } else if (mf === 'grit') {
@@ -754,7 +755,8 @@ function renderStickFaceEmo(o, E, hy, blk, talk, mo, ink, lx, rx, eyeY) {
     const dy = -(+E.smile || 0) * 5;
     mouth = `<path d="M-22,${f(my + 5 + dy)} Q-15,${f(my - 1 + dy)} -8,${f(my + 5 + dy)} T6,${f(my + 5 + dy)} T20,${f(my + 5 + dy)}" fill="none" stroke="${ink}" stroke-width="3.8" stroke-linecap="round"/>`;
   } else if (mf === 'tight') {
-    mouth = `<path d="M-18,${f(my + 2)} Q0,${f(my + 8)} 18,${f(my + 2)}" fill="none" stroke="${ink}" stroke-width="4.6" stroke-linecap="round"/>`;
+    // pain / effort: a grimace, clenched teeth with the corners pulled down (it used to be a small smile curve)
+    mouth = `<path d="M-25,${f(my + 9)} Q-13,${f(my - 1)} 0,${f(my + 1)} Q13,${f(my - 1)} 25,${f(my + 9)} Q12,${f(my + 15)} 0,${f(my + 14)} Q-12,${f(my + 15)} -25,${f(my + 9)} Z" fill="#ffffff" stroke="${ink}" stroke-width="3.8" stroke-linejoin="round"/><path d="M-12,${f(my + 2)} V${f(my + 14)} M0,${f(my + 1)} V${f(my + 14)} M12,${f(my + 2)} V${f(my + 14)} M-21,${f(my + 8)} Q0,${f(my + 6)} 21,${f(my + 8)}" stroke="${ink}" stroke-width="2" fill="none"/>`;
   } else if (mf === 'flat') {
     mouth = curve((+E.smile || 0) * 8);
   } else {

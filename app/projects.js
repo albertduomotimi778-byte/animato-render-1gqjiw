@@ -80,7 +80,9 @@ export function sameAudio(a, b) {
 
 /** Voiceover clips live in a separate record ('a:' + id) so a save of the form does not rewrite big audio files. */
 export const AUDIO_PREFIX = 'a:';
-export const isProject = (r) => !!r && typeof r.id === 'string' && !r.id.startsWith(AUDIO_PREFIX);
+/** The transcript of the project's voiceover lives in its own record ('tx:' + id), kept so a reopened project never transcribes again. */
+export const TX_PREFIX = 'tx:';
+export const isProject = (r) => !!r && typeof r.id === 'string' && !r.id.startsWith(AUDIO_PREFIX) && !r.id.startsWith(TX_PREFIX);
 
 export function createProjectStore(env = {}) {
   const idb = env.indexedDB !== undefined ? env.indexedDB : (typeof indexedDB !== 'undefined' ? indexedDB : null);
@@ -119,7 +121,7 @@ export function createProjectStore(env = {}) {
       return mem.get(id) || null;
     },
     async put(rec) { mem.set(rec.id, rec); await tx('readwrite', (s) => s.put(rec)); return true; },
-    async remove(id) { mem.delete(id); mem.delete(AUDIO_PREFIX + id); await tx('readwrite', (s) => { s.delete(id); s.delete(AUDIO_PREFIX + id); }); return true; },
+    async remove(id) { mem.delete(id); mem.delete(AUDIO_PREFIX + id); mem.delete(TX_PREFIX + id); await tx('readwrite', (s) => { s.delete(id); s.delete(AUDIO_PREFIX + id); s.delete(TX_PREFIX + id); }); return true; },
     persistent: () => !!idb,
   };
 }

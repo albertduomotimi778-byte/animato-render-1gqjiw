@@ -18,9 +18,9 @@ import { backgroundPromptBlock } from './background-mode.js';
 
 import { EMOTION_NAMES, EXPRESSION_MARKER } from './expressions.js';
 import { ACTION_NAMES, ACTING_MARKER } from './acting.js';
-import { DIRECTOR_MARKER, directorRule } from './director.js';
 import { livelinessRule } from './liveliness.js';
 import { contentTypeBlock, isType } from './content-types.js';
+import { shotRule, SHOTS_MARKER } from './shots.js';
 
 export const GUIDED_MARKER = 'ANIMATO GUIDED MODE';
 export const TIERS = ['guided', 'full'];
@@ -154,7 +154,6 @@ thumbnail({aspect:'16:9', background:LOC.office(), tint:['#ff0033',.08], camera:
     batch,
     `/* PLAN: 7 beats, ${total}s. 1 hook (street) | 2 problem (bank) | 3 progress (garage, chart) | 4 chapter card | 5 twist (office) | 6 decision close-up | 7 payoff (rooftop) */`,
     `movie({title:'The Hundred Dollar Idea', aspect:'${tall ? '9:16' : '16:9'}'${kit.movieChar}});`,
-    `voiceover({text:'${q(narration.join(' '))}', mode:'own'});`,
     ...kit.cast,
     ...(thumb ? [thumb.trim()] : []),
     `storyboard([
@@ -167,13 +166,13 @@ thumbnail({aspect:'16:9', background:LOC.office(), tint:['#ff0033',.08], camera:
   {n:7, see:'Mara cheers on a rooftop with a cheering crowd', do:{hero:'cheer'}, build:[]}
 ]);`,
     '',
-    `beat({n:'Hook', d:${d[0]}, s:'street', m:'night', c:'pushSlow', a:[['hero','walkR@0->idle@3.6',[${tall ? '700,820' : '200,700'}],[790,800],{brow:'sad',mouth:'flat',face:'hopeful@0->worried@3.4'}]], p:[['tag','CITY · 3 YEARS AGO',${X.tag},120,0.3,5.5],['item','coin','$100',${X.prop1},560,1.1,1.0],['bubble','One chance...',${tall ? 800 : 640},300,'think',2.4,5.8]], say:'${q(narration[0])}'});`,
-    `beat({n:'Nobody believed', d:${d[1]}, s:'bank', m:'cold', c:'wide', a:[['hero','react:sad',${X.near},{view:'front',face:'embarrassed@0->sad@2.8'}],['boss','react:laugh',${X.far},{brow:'happy',mouth:'grin',face:'laughing@0->smug@3.6'}]], p:[['headline','LOAN DENIED','BANK',0.5,5.4],['item','cross',null,${tall ? 800 : 1250},300,1.0,1.4],['bubble','HA HA HA',${X.far},330,'say',1.6,5.4]], say:'${q(narration[1])}'});`,
-    `beat({n:'Building it', d:${d[2]}, s:'garage', m:'night', c:'push', a:[['hero','type@0->cheer@4.4',${X.c},[780,800],{brow:'calm',mouth:'smile',face:'tired@0->determined@2.2->excited@4.2'}]], p:[['chart',[1,2,3,5,9,16,30],${tall ? 800 : 1100},${tall ? 380 : 330},${tall ? 400 : 360},200,'USERS',0.8,5.8],['counter',0,10000,'','',800,140,0.6,5.6,'#6fe08a'],['item','laptop','APP',${tall ? 800 : 480},${tall ? 640 : 620},1.0,0.4]], say:'${q(narration[2])}'});`,
+    `beat({n:'Hook', d:${d[0]}, s:'street', m:'night', light:{x:1250,y:150,color:'#9fb7ff'}, shot:'establish@0->feet:hero@"Mara"->close:hero@"crazy"', a:[['hero','walkR@0->idle@"crazy"',[${tall ? '700,820' : '200,700'}],[790,800],{brow:'sad',mouth:'flat',face:'hopeful@0->worried@3.4'}]], p:[['tag','CITY · 3 YEARS AGO',${X.tag},120,0.3,5.5],['item','coin','$100',${X.prop1},560,1.1,1.0],['card','ONE CHANCE...',800,170,72,'#ffd54a',2.4,5.8]], say:'${q(narration[0])}'});`,
+    `beat({n:'Nobody believed', d:${d[1]}, s:'bank', m:'cold', shot:'two:hero+boss@0->low:boss@"laughed"->high:hero@"friends"->close:hero@"stop"', a:[['hero','react:sad',${X.near},{view:'front',face:'embarrassed@0->sad@2.8'}],['boss','react:laugh',${X.far},{brow:'happy',mouth:'grin',face:'laughing@0->smug@3.6'}]], p:[['headline','LOAN DENIED','BANK',0.5,5.4],['item','cross',null,${tall ? 800 : 1250},300,1.0,1.4],['card','HA HA HA',800,170,72,'#ffd54a',1.6,5.4]], say:'${q(narration[1])}'});`,
+    `beat({n:'Building it', d:${d[2]}, s:'garage', m:'night', light:{x:${X.c},y:420,color:'#8fd3ff'}, shot:'hands:hero@0->medium:hero@"night"->push:hero@"users"', a:[['hero','type@0->cheer@4.4',${X.c},[780,800],{brow:'calm',mouth:'smile',face:'tired@0->determined@2.2->excited@4.2'}]], p:[['chart',[1,2,3,5,9,16,30],${tall ? 800 : 1100},${tall ? 380 : 330},${tall ? 400 : 360},200,'USERS',0.8,5.8],['counter',0,10000,'','',800,140,0.6,5.6,'#6fe08a'],['item','laptop','APP',${tall ? 800 : 480},${tall ? 640 : 620},1.0,0.4]], say:'${q(narration[2])}'});`,
     `beat({n:'The turn', chapter:true, d:3.4, say:'${q(narration[3])}'});`,
-    `beat({n:'The offer', d:${d[4]}, s:'office', m:'tense', c:'crash', flash:1.4, a:[['boss','speak:front',${X.far},{brow:'angry',mouth:'smirk',face:'smug@0->scheming@3'}],['hero','react:shock',${X.near},{view:'back'}]], p:[['headline','BUYOUT OFFER','BREAKING',0.4,5.2],['item','bag','$1,000,000',${tall ? 800 : 800},520,1.3,0.8],['spot',${tall ? 800 : 800},520,260,'#ffd54a',0.8,5.2]], say:'${q(narration[4])}'});`,
-    `beat({n:'The choice', d:${d[5]}, s:'office', m:'tense', c:'pushFace', a:[['hero','react:think@0->fist@3.6',${X.c},{view:'front',scale:0.9,face:'worried@0->thinking@1.6->determined@3.4'}]], p:[['item','check','OFFER',${tall ? 800 : 1150},330,1.0,0.5],['bubble','Is this the end?',${tall ? 800 : 640},280,'think',1.2,5.2],['dim',0.25,0,5.4]], say:'${q(narration[5])}'});`,
-    `beat({n:'No deal', d:${d[6]}, s:'rooftop', m:'warm', c:'zoomOut', flash:0.4, a:[['hero','present@0->cheer@2.4',${tall ? 800 : 640},[780,800],{brow:'happy',mouth:'grin',face:'proud@0->excited@2.2'}],['crowd',6,'cheer',840,{view:'back',scale:0.4,par:-0.25}]], p:[['counter',0,1000000000,'$','',800,150,0.5,4.9,'#ffd54a'],['item','trophy',null,${tall ? 800 : 1150},560,1.2,1.2],['year',2021,2026,${tall ? 800 : 1380},300,0.3,5.2]], say:'${q(narration[6])}'});`,
+    `beat({n:'The offer', d:${d[4]}, s:'office', m:'tense', shot:'low:boss@0->ots:hero>boss@"offered"->push:boss@"walk"', flash:1.4, a:[['boss','speak:front',${X.far},{brow:'angry',mouth:'smirk',face:'smug@0->scheming@3'}],['hero','react:shock',${X.near},{view:'back'}]], p:[['headline','BUYOUT OFFER','BREAKING',0.4,5.2],['item','bag','$1,000,000',${tall ? 800 : 800},520,1.3,0.8],['spot',${tall ? 800 : 800},520,260,'#ffd54a',0.8,5.2]], say:'${q(narration[4])}'});`,
+    `beat({n:'The choice', d:${d[5]}, s:'office', m:'tense', shot:'eyes:hero@0->close:hero@"users"->push:hero@"did"', a:[['hero','react:think@0->fist@3.6',${X.c},{view:'front',scale:0.9,face:'worried@0->thinking@1.6->determined@3.4'}]], p:[['item','check','OFFER',${tall ? 800 : 1150},330,1.0,0.5],['card','IS THIS THE END?',800,170,72,'#ffd54a',1.2,5.2],['dim',0.25,0,5.4]], say:'${q(narration[5])}'});`,
+    `beat({n:'No deal', d:${d[6]}, s:'rooftop', m:'warm', light:{x:1300,y:200,color:'#ffcf8a'}, shot:'close:hero@0->low:hero@"word"->pull:hero@"company"', flash:0.4, a:[['hero','present@0->cheer@2.4',${tall ? 800 : 640},[780,800],{brow:'happy',mouth:'grin',face:'proud@0->excited@2.2'}],['crowd',6,'cheer',840,{view:'back',scale:0.4,par:-0.25}]], p:[['counter',0,1000000000,'$','',800,150,0.5,4.9,'#ffd54a'],['item','trophy',null,${tall ? 800 : 1150},560,1.2,1.2],['year',2021,2026,${tall ? 800 : 1380},300,0.3,5.2]], say:'${q(narration[6])}'});`,
     '// END OF FILE',
   ];
   return { code: lines.join('\n'), narration, beatSeconds: d, totalSec: total };
@@ -185,35 +184,37 @@ const FREEDOM = `YOUR CREATIVE TOOLS (all of these work inside beat({...}); mix 
 - YOUR OWN SET: SETS.kitchen = '<defs><linearGradient id="kw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3d9a4"/><stop offset="1" stop-color="#c98f52"/></linearGradient></defs><rect width="1600" height="900" fill="url(#kw)"/>...cabinets, window, table, lamp...'; then s:'kitchen'. A full 1600 x 900 SVG drawing: wall, floor line near y 790, furniture, windows, light sources, depth. Make it specific to the words (a hospital ward, a village market, a bank vault, a forest at night).
 - YOUR OWN OBJECT: SVGS.car = '<g>...</g>' (drawn around (0,0) = where it touches the ground, facing right, real size beside a 640-tall person); place it with ['svg','car',x,790,1,t0,'move',{to:[1400,790],t2:3}]. Motions: none | float | pulse | spin | trot | sneak | drop | move | jump. {follow:'hero',dx:170,leash:true} makes it walk with a person (a dog on a leash, a suitcase).
 - YOUR OWN ANIMATION: any prop can be a raw object with its own JavaScript: {svg:'<g>...</g>', x:800, y:500, show:[0.5,5], layer:'back'|'front', animate:t=>({x:Math.sin(t*2)*40, y:-t*30, rot:t*90, scale:1+t*.1, opacity:1})}, or {svgFn:t=>'<g>...drawn for time t...</g>', x:800, y:450} for things that change shape (rain falling, fire flickering, a door swinging open, a glass filling, money raining, a bar growing, lightning). Add screen:true to draw on top of the camera (titles, HUDs).
-- YOUR OWN CAMERA: c:[zoomFrom,zoomTo,xFrom,yFrom,xTo,yTo] or c:t=>({zoom:1+t*.05, x:800, y:450, rot:0}).
+- YOUR OWN CAMERA (only for a move no shot word covers): c:t=>({zoom:1+t*.05, x:800, y:450, rot:0}).
 - THE CHARACTERS come from the app (the chosen style). You direct them with moves, expressions, positions, size and timing. People ALWAYS face the camera: walking and running are shown facing the camera while the camera pans to follow them; turned away = view:'back'. Never a side view.
-- Draw with care: layered shapes, gradients, shadows, highlights, a clear light source, colours from one palette. Every drawing must read instantly on a phone. SVG only (no <image>, no <script>, no external links); give every gradient id a unique name.`;
+- Draw with care: layered shapes, gradients, shadows, highlights, one light source, one palette; it must read instantly on a phone. SVG only (no <image>, <script> or links); unique gradient ids.`;
 
 const SCENE_BY_SCENE = `SCENE BY SCENE: THE PICTURE IS WHAT THE NARRATOR SAYS (this is the most important rule; work in this order, and nothing limits what you may draw):
 1. Cut the narration into scenes: one scene = one sentence or one action. Number them 1, 2, 3...
-2. For EACH scene, in order, fill in this worksheet in the storyboard([...]) before any beat code:
-   say = the exact words the narrator speaks in this scene.
+2. For EACH scene, in order, fill in this worksheet in the storyboard([...]) before any beat code (short entries: do NOT copy the narration into it, the beat's say holds the words):
    see = what a viewer with the sound OFF sees: the SAME subject doing the SAME verb to the SAME object as the words. If the words say "a thief jumped over the fence", the picture is a thief in black jumping over a fence, not a man walking.
    do = what each person does, and on which word it starts.
    build = every place, object, animal, vehicle or effect the words name that you must draw yourself (nothing is off limits; the built-in lists are only shortcuts).
-   set = where and when it happens. cam = the shot that shows it best (close-up for feelings, hands for actions, wide for a reveal).
+   set = where and when it happens. cam = the shots, phrase by phrase (feet for arriving, low for someone big, hands for picking up or tying, eyes then pov for seeing, close for feelings).
 3. Only after the whole storyboard is written, build the beats ONE BY ONE in the same order. Beat 1 shows scene 1 and nothing else. Then beat 2 shows scene 2. Never jump ahead, never show something before the narrator says it, never leave a sentence without its own picture.
 4. Check each beat before the next: cover the sound and read only the screen. Could a stranger tell what the sentence said? If not, redraw that beat.
-5. FACE AND BODY MATCH THE SITUATION (never a mismatch): before you write a face: track, ask "what would this person truly feel doing this, here?". "He walked through the fire and destroyed the man" = a face of pain, fury and grit (pain@0->furious@1.5->determined@3), arms shielding or fists clenched, flames drawn all around him with embers and heat glow, then the man shown being struck down. Never a smile or a calm face while walking through fire, falling, fleeing, grieving or fighting. Listeners and victims show their own matching feeling (fear, shock, pain). Smiling is only for joy, pride or a smug villain, and only when the words say so.
-6. EVERY ELEMENT IN THE SET: every noun, place, object, weather, creature, sound source and effect the narrator names in a scene must be visibly drawn in that scene's set or props, in rich detail (layered SVG: shapes, gradients, shadows, light, motion such as flickering flames, drifting smoke, falling rain). If the words say "fire", the screen is full of believable fire; if they say "crowd", people fill the background. Add the small supporting details the situation implies (sparks, debris, reflections, damage, reactions of bystanders) so each scene is a detailed illustration of the words, not a person in front of a plain wall.
-7. When the narrator changes place, time or person, the picture changes with it (new set, new light, a "3 YEARS LATER" card). When the narrator names a feeling, the face and body show it. When the narrator says a number, it is on screen.
-8. ${livelinessRule()}`;
+5. FACE AND BODY MATCH THE SITUATION: ask "what would this person truly feel doing this, here?". Walking through fire = pain, fury, grit (pain@0->furious@1.5->determined@3), never a smile. Smiles only for joy, pride or a smug villain. Listeners and victims show their own feeling (fear, shock, pain).
+6. EVERY ELEMENT IN THE SET: every noun, place, weather, creature and effect the words name is drawn in that scene in rich detail (layered SVG with gradients, shadows, light and motion: flickering flames, drifting smoke, falling rain), plus the small details the situation implies (sparks, debris, bystanders reacting). Never a person in front of a plain wall.
+7. When the narrator changes place, time or person, the picture changes with it (new set, new light, a "3 YEARS LATER" card).
+8. ACT, DON'T STAND: gestures on stressed words, listeners react the moment a line lands, every person has a different manner, anticipation before a big move and a settle after it. The app adds breathing, blinks and idle motion; you make the BIG acting choices.`;
 
 const MISTAKES = `MISTAKES THAT BREAK THE FILE (wrong -> right):
 - say:'She didn't know'  ->  say:"She didn't know"   (a ' inside a ' string ends it. Use double quotes around text that has an apostrophe.)
 - “curly quotes”  ->  "straight quotes"   (straight ' and " only)
 - // ... more beats here  ->  write every beat out in full. No placeholders, no "and so on".
 - s:'warehouse' with no SETS.warehouse defined  ->  draw it first: SETS.warehouse = '<rect .../>...' (or use a built-in location).
-- c:'zoom in'  ->  c:'push'   (c must be a name from the CAMERAS list.)
+- c:'zoom in'  ->  shot:'push:hero@0'   (shot kinds and c words must come from their lists.)
 - ['item','rocketship',...]  ->  ['item','rocket',...] (a built-in icon) or draw SVGS.rocketship and use ['svg','rocketship',...].
-- d:5   when the say text has 20 words  ->  d = words / 2.65 + 0.55, so 20 words is d:8.1
-- movie(...) again in part 2  ->  movie(), voiceover() and thumbnail() appear ONLY in part 1.
-- writing the story as chat text, or "Here is your file"  ->  the code block is the whole answer.
+- d:5   when the say text has 20 words  ->  leave d out; the app times the beat from its words.
+- shot:'close:Amara@2' with CAST.amara  ->  shot:'close:amara@2'   (the cast name exactly as in CAST.name).
+- the narrator says "she tied the towel" and nobody holds a towel  ->  draw SVGS.towel and give it {hold:'amara'}, then {wear:'amara',at:'waist'} on "tied", with shot hands:amara@"tied".
+- movie(...) again in part 2  ->  movie() and thumbnail() appear ONLY in part 1. Never write voiceover(): the app makes the voiceover script from your say lines.
+- writing the story as chat text, "Here is your file" or "Shall I continue?"  ->  the code (or the zip) is the whole answer; parts follow one another without asking.
+- a speech or thought bubble  ->  never (captions carry the words); the face shows the feeling, the key word goes big: ['card','NO WAY',800,170,80,'#ffd54a',t0,t1].
 - one face for the whole beat ({brow:'sad',mouth:'flat'} and nothing else)  ->  add face:'worried@0->shocked@2.2' so the face changes with the story. Words outside the EMOTIONS list (terrified, grumpy) are ignored: use scared, angry.
 - view:'side' or walkR:side  ->  never. People always face the camera; c:'panR' / 'panL' / 'cover' follows them.
 - no storyboard([...]) before the first beat  ->  the storyboard comes FIRST, one entry per beat, then the beats in the same order.
@@ -221,45 +222,47 @@ const MISTAKES = `MISTAKES THAT BREAK THE FILE (wrong -> right):
 
 const RECIPES = `BEAT RECIPES (copy the shape, change the words):
 HOOK (beat 1, 3 to 6 s, starts in the middle of the action):
-  beat({n:'Hook', d:5.4, s:'street', m:'rain', c:'crash', flash:1.2, a:[['hero','runR@0->react:shock@3.5',[200,700],[790,800],{face:'scared@0->shocked:1.3@3.3'}]], p:[['headline','30 DAYS LEFT','BREAKING',0.4,4.8],['item','clock',null,1200,300,1.1,0.8],['bubble','Not again!',640,300,'say',1.5,4.5]], say:'...'});
+  beat({n:'Hook', s:'street', m:'rain', shot:'crash:hero@0->feet:hero@1.2->reaction:hero@3.3', flash:1.2, a:[['hero','runR@0->react:shock@3.5',[200,700],[790,800],{face:'scared@0->shocked:1.3@3.3'}]], p:[['headline','30 DAYS LEFT','BREAKING',0.4,4.8],['item','clock',null,1200,300,1.1,0.8],['card','NOT AGAIN!',800,170,72,'#ffd54a',1.5,4.5]], say:'...'});
 EXPLAIN (a fact, a number or a trend):
-  beat({n:'The numbers', d:6.0, s:'office', m:'calm', c:'push', a:[['hero','present',520,{view:'front'}]], p:[['chart',[2,3,5,8,13,21],1100,340,360,200,'SALES',0.8,5.5],['counter',0,50000,'$','',800,140,0.6,5.5,'#6fe08a'],['tag','2024 · Q3',1380,110,0.3,5.5]], say:'...'});
+  beat({n:'The numbers', s:'office', m:'calm', shot:'medium:hero@0->push:hero@3', a:[['hero','present',520,{view:'front'}]], p:[['chart',[2,3,5,8,13,21],1100,340,360,200,'SALES',0.8,5.5],['counter',0,50000,'$','',800,140,0.6,5.5,'#6fe08a'],['tag','2024 · Q3',1380,110,0.3,5.5]], say:'...'});
 EMOTION (close-up, nobody else needed):
-  beat({n:'Alone', d:5.2, s:'apartment', m:'night', c:'pushFace', a:[['hero','react:sad@0->idle@3',800,{view:'front',scale:0.9,face:'sad@0->disappointed@2.6'}]], p:[['item','heart',null,1150,320,1.0,1.0],['bubble','Why me?',640,300,'think',1.2,4.8]], say:'...'});
-SHORT-FILM STORY (a HUD timer on top, close-ups, sticky notes for rules; end on a punchline note or a choice):
-  beat({n:'3:12 AM', d:4.8, s:'apartment', m:'night', a:[['hero','react:shock@0.4',800,{scale:0.95}]], p:[['timer','IMPACT IN',898,893,800,90,0,4.8,'#e74c3c'],['phone','3:12',['EMERGENCY ALERT','Mom: missed call'],800,330,0.3,4.6]], say:'...'});
-  beat({n:'Rule one', d:4.2, s:'garage', m:'dark', c:'cover', a:[['hero','walkR@0->point@2',[700,820],[790,800],{scale:0.9}],['friend','react:think',980]], p:[['timer','IMPACT IN',893,889,800,90,0,4.2,'#e74c3c'],['note','RULE #1',"DON'T LOOK AT THE FLASH",800,240,0.5,4]], say:'...'});
-REFLECTION (a big question like "What does life mean?"), epic, never a person standing still:
-  beat({n:'The question', d:5.6, s:'rooftop', m:'night', c:'pushFace', a:[['hero','lookaround@0->react:think@2.6',800,{view:'front',scale:1.0}]], p:[['dim',0.3,0,5.6],['spot',800,430,320,'#ffd54a',0.3,5.6],['typewriter','WHAT IS LIFE?',800,105,80,0.6,14,'#fff'],['item','star',null,1180,220,0.8,1.4]], say:'...'});
+  beat({n:'Alone', s:'apartment', m:'night', shot:'high:hero@0->push:hero@2->eyes:hero@4', a:[['hero','react:sad@0->idle@3',800,{view:'front',scale:0.9,face:'sad@0->disappointed@2.6'}]], p:[['item','heart',null,1150,320,1.0,1.0],['card','WHY ME?',800,170,72,'#ffd54a',1.2,4.8]], say:'...'});
+SHORT-FILM STORY (a HUD timer on top, close-ups, sticky notes for rules):
+  beat({n:'3:12 AM', s:'apartment', m:'night', shot:'eyes:hero@0->close:hero@1.6', a:[['hero','react:shock@0.4',800,{scale:0.95}]], p:[['timer','IMPACT IN',898,893,800,90,0,4.8,'#e74c3c'],['phone','3:12',['EMERGENCY ALERT','Mom: missed call'],800,330,0.3,4.6]], say:'...'});
 MONTAGE: one icon per idea, each popping in on its own word: p:[['item','house','HOME',420,260,1,0.6,2.4],['item','laptop','WORK',800,230,1,2,3.9],['item','heart','LOVE',1180,260,1,3.5,6]]
 CHAPTER CARD (black screen, 2 to 4 words of text, once or twice per video):
   beat({n:'Part two', chapter:true, d:3.2, say:'But nobody saw it coming.'});
 CROWD OR REACTION (many people watching):
-  beat({n:'The crowd', d:5.5, s:'cityDay', m:'hype', c:'wide', a:[['hero','cheer',800,[780,800]],['crowd',8,'cheer',840,{view:'back',scale:0.4,par:-0.25}]], p:[['item','trophy',null,1150,520,1.2,0.8]], say:'...'});
+  beat({n:'The crowd', s:'cityDay', m:'hype', shot:'wide@0->low:hero@2.2->close:hero@4', a:[['hero','cheer',800,[780,800]],['crowd',8,'cheer',840,{view:'back',scale:0.4,par:-0.25}]], p:[['item','trophy',null,1150,520,1.2,0.8]], say:'...'});
+WALK PAST SOMEONE BIG (size and power, word by word):
+  beat({n:'The guards', s:'street', m:'warm', shot:'feet:amara@0->tiltup:guard@"hefty"->low:guard@"they"->high:amara@"kept"', a:[['amara','walkR@0',[250,700],790,{face:'calm@0->nervous@"hefty"->determined@"kept"'}],['guard','idle@0->turnaway@"kept"',1050,800,{scale:1.25,face:'deadpan@0->suspicious@"they"'}]], p:[['tag','MAIN GATE',1380,110,0.3,5]], say:'She walked past the guards, as hefty as they were, and kept going.'});
+CONVERSATION (shot / reverse shot, the listener reacts):
+  beat({n:'The deal', s:'office', m:'tense', shot:'two:boss+hero@0->ots:hero>boss@1.6->ots:boss>hero@"no"->close:hero@"never"', a:[['boss','speak@0->idle@"no"',1050,795,{face:'smug@0'}],['hero','idle@0->speak@"no"',560,795,{face:'worried@0->determined@"no"'}]], p:[['item','bag','$1M',800,560,1.0,0.6]], say:"Take the money, or lose everything. No. Never."});
 PAYOFF (last beat, echoes beat 1):
-  beat({n:'Full circle', d:6.0, s:'street', m:'warm', c:'zoomOut', a:[['hero','walkL@0->wave@4',[1200,700],[790,800]]], p:[['item','star',null,1150,320,1.2,1.0]], say:'...'});`;
+  beat({n:'Full circle', s:'street', m:'warm', shot:'track:hero@0->close:hero@3->pull:hero@4.2', a:[['hero','walkL@0->wave@4',[1200,700],[790,800]]], p:[['item','star',null,1150,320,1.2,1.0]], say:'...'});`;
 
 const TEMPLATE = `ONE BEAT = ONE FILLED-IN LINE. Every field, in this order:
 beat({
   n:'Short name',                       // 1 to 3 words
-  d:5.4,                                // seconds = words in say / 2.65 + 0.55  (never leave it out)
-  s:'street',                           // LOCATION (list below)
+  s:'street',                           // LOCATION: a built-in word (list below) or your own SETS.name
   m:'night',                            // MOOD (list below)
-  c:'pushSlow',                         // CAMERA (list below). Use a different one than the beat before.
-  flash:1.2,                            // optional: white flash at that second (use on shocks and reveals)
+  light:{x:1250,y:160,color:'#ffd9a0'}, // where the light in your set is (lamp, window, sun): the people are lit from there
+  shot:'establish@0->feet:hero@"walked"->close:hero@"saw"',   // THE CAMERA: named shots that cut on the spoken word (see CINEMATOGRAPHY BY NAME)
   a:[                                   // ACTORS, 1 to 3 per beat
-    ['hero', 'walkR@0->react:shock@3.4', [200,700], [790,800], {brow:'sad', mouth:'flat', face:'worried@0->shocked@3.2'}]
-  ],                                    //   ['id', 'move@sec->move@sec', x or [fromX,toX], ground y or [fromY,toY], {options}]
+    ['hero', 'walkR@0->idle@"saw"->react:shock@"door"', [200,700], 790, {face:'calm@0->worried@"saw"->shocked@"door"'}]
+  ],                                    //   ['id', 'move@time->move@time', x or [fromX,toX], ground y or [fromY,toY], {options}]
                                         //   options: brow, mouth = the resting face;  face = the feelings that cross it during the beat
-  p:[                                   // PROPS, 3 or more per beat
-    ['item','coin','$100',1180,560,1.1,1.0],
-    ['bubble','One chance...',640,300,'think',2.4,5.8]
+  p:[                                   // PROPS, 3 or more per beat (times can be words too: '@"door"')
+    ['item','phone',null,1180,560,1.1,'@"saw"'],
+    ['card','WHO IS THERE?',800,170,72,'#ffd54a','@"door"']
   ],
-  say:'The exact narration for this beat.'   // the caption is made from this automatically
+  say:'She walked to the window and saw the door move.'   // the exact narration of this beat; the caption and the voiceover script are made from it
 });
-x runs 0 to 1600. Ground y is 700 to 860. Actor scale is about 0.85 by default (main people fill about half the frame height), 1.0 to 1.25 for close-ups and emotional moments, 0.4 only for crowds and far-away people.
-Views for an actor: front (always, including walking and running: the person faces the camera and the camera pans to follow them) or {view:'back'} for someone watching the action from the foreground. Never use side views.
-Moves are chained with -> and may carry @seconds (when the move starts) and :view (which way the actor faces).`;
+d (seconds) is OPTIONAL: leave it out and the app times the beat from its words (2.65 words a second). Write d only for a beat with no words (d:3).
+TIMES: a number is seconds from the start of the beat; @"word" means "the moment that word is spoken" (@"her#2" = the second "her"). Prefer words: they are always in sync.
+x runs 0 to 1600. Ground y is 700 to 860. Actor scale is about 0.85 by default (main people fill about half the frame height), 1.1 to 1.3 for someone big, strong or scary, 0.4 only for crowds and far-away people.
+Views for an actor: front (always, including walking and running: the person faces the camera and the camera follows them) or {view:'back'} for someone watching the action from the foreground. Never use side views.
+c:'push' (a CAMERAS word) still works for one simple move, but shot:'...' is what makes it look like a film.`;
 
 const PROPS = `PROP TUPLES (inside p:[ ... ]):
 ['item','ICON','LABEL or null',x,y,scale,t0,t1]   pops in at t0 seconds, out at t1 (t1 optional)
@@ -270,7 +273,6 @@ const PROPS = `PROP TUPLES (inside p:[ ... ]):
 ['year',from,to,x,y,t0,t1]                          year ticking forward
 ['chart',[numbers],x,y,w,h,'LABEL',t0,t1]           line chart that draws itself
 ['bars',[numbers],['A','B','C'],x,y,t0]             bar chart
-['bubble','TEXT',x,y,'say' or 'think',t0,t1]        speech or thought bubble
 ['bullets',['one','two','three'],x,y,t0]            list that appears line by line
 ['fly','bill',8,x0,y0,x1,y1,t0]                     icons flying from one place to another
 ['stack','coin',6,x,y,t0]                           icons stacking up
@@ -281,7 +283,8 @@ SHORT-FILM TOOLS (the look of the best story channels):
 ['note','RULE #1',"DON'T LOOK AT THE FLASH",x,y,t0,t1]   yellow sticky-note card for a rule, a lesson, a fact or the punchline
 ['phone','3:12',['Mom: missed call','City alert'],x,y,t0,t1]  a phone screen with the time and notifications sliding in
 ['choice','STAY IN THE BUNKER','RUN TO YOUR MOM',t0,t1]  A and B option cards (a decision or a cliffhanger ending)
-OWN DRAWINGS (only things the words name that the lists lack: dog, fence, ladder): SVGS.dog = '<g>...</g>' at the top (SVG shapes, (0,0) = ground, facing right, real size beside a 640-tall person); place it: ['svg','dog',x,790,1,t0,'trot',{follow:'hero',dx:170,leash:true}] (walks with the actor on a leash) or ['svg','fence',1000,790,1,0,'none']. Motions: none | float | trot | sneak | move {to:[x1,y1],t2} | jump {to:[x1,y1],h:220}`;
+OWN DRAWINGS (only things the words name that the lists lack: dog, fence, ladder, towel): SVGS.dog = '<g>...</g>' at the top (SVG shapes, (0,0) = ground, facing right, real size beside a 600-tall person); place it: ['svg','dog',x,790,1,t0,'trot',{follow:'hero',dx:170,leash:true}] (walks with the actor on a leash) or ['svg','fence',1000,790,1,0,'none']. Motions: none | float | trot | sneak | move {to:[x1,y1],t2} | jump {to:[x1,y1],h:220}
+THINGS A PERSON HOLDS OR WEARS move with them: ['svg','towel',0,0,0.8,'@"carried"','none',{hold:'amara',t1:'@"tied"'}] = in her hand from "carried" until "tied"; then ['svg','towelWrap',0,0,1,'@"tied"','none',{wear:'amara',at:'waist'}] = around her waist from "tied" on. at: hand | waist | head | hat | neck | shoulder | chest | back | feet. Draw held things around (0,0) = their centre.`;
 
 const GUIDED_FACES = `${EXPRESSION_MARKER} (the face tells the story with the sound off):
 - brow: and mouth: are only the RESTING face. face:'emotion@second->emotion@second' inside {options} makes it ACT: {face:'worried@0->shocked@1.8->angry@3.4'} (strength is optional: shocked:1.4). Use only the EMOTIONS list.
@@ -316,23 +319,22 @@ const STORY_RULES = `HOW TO MAKE IT GOOD (this is what separates a great video f
 1. Beat 1 is the hook. Start in the middle of the action with the most surprising fact or moment. No "Hello", no "Today we will".
 2. Story shape: hook -> problem -> things get worse -> turn (around 65% of the way) -> payoff -> last beat echoes beat 1.
 3. Narration: short sentences, concrete nouns, real numbers, one idea per beat. Read it aloud: it must sound like a person talking.
-4. Every beat needs: a location, a mood, a camera different from the beat before, at least 3 props, and an actor doing 2 moves in a row.
-5. Change location at least every 2 beats. Use a chapter card (chapter:true) once or twice. Put a graphic-heavy moment (chart, counter, headline) in about 1 beat out of 4, with a small actor still on screen reacting to it.
-6. Show what the narrator says: every number, place, object and feeling in say must appear on screen in that same beat.
-7. Mouths stay closed unless a character speaks in the story (use 'speak' only then). The narrator is a voiceover, not a character.
-8. Do not invent facts about real people, companies or current events.
-9. CHARACTER GUARANTEE: every single beat must have at least one actor on screen in its a:[...] list, even a chart or headline beat (put a host or a reacting actor beside it). A beat with no actor is a failed beat. Never use a cast name you did not define. If a reference image was chosen but you have none, use the stickman or the default character already in this app, the same one in every beat.`;
+4. Every beat needs: a location, a mood, a light, a shot track with 2 to 4 shots (never the same opening shot as the beat before), at least 3 props, and an actor doing 2 moves in a row.
+5. Change location at least every 2 beats. A chapter card (chapter:true) once or twice. A graphic moment (chart, counter, headline) in about 1 beat in 4, with an actor reacting beside it.
+6. Mouths stay closed unless a character speaks in the story (use 'speak' only then). The narrator is a voiceover, not a character.
+7. Do not invent facts about real people, companies or current events.
+8. CHARACTER GUARANTEE: every single beat must have at least one actor on screen in its a:[...] list, even a chart or headline beat (put a host or a reacting actor beside it). A beat with no actor is a failed beat. Never use a cast name you did not define. If a reference image was chosen but you have none, use the stickman or the default character already in this app, the same one in every beat.`;
 
 const VERTICAL_RULES = `TIKTOK VERTICAL CANVAS (9:16): the app crops the wide 1600x900 world to a tall frame and fits the people into it by itself, giving every character room to breathe.
 - Write the scene exactly as for a wide video: put people where the story needs them on the wide stage (x 300 to 1300), about 150 to 250 apart, never on top of each other. Do NOT squeeze everyone into x 640 to 960 and do NOT shrink or zoom to fit: the app scales them down, staggers them in rows and frames the group.
 - At most 3 main people in one shot (more only as small background crowds). Use close-ups with one person for feelings.
 - Props, icons and pictures sit ABOVE the heads (y 120 to 330), near the middle (x 650 to 950); keep the bottom quarter calm for captions.
-- Text is short: bubbles 1 to 3 words, headlines 2 to 4 words. No thumbnail() in this video.
+- Text is short: kinetic words 1 to 3 words, headlines 2 to 4 words. No thumbnail() in this video.
 - Open on the face or the problem in the first second. Fast cuts: aim for beats of 3.5 to 5 s.`;
 
 function platformLine(vo) {
   const p = String(vo || 'elevenlabs').toLowerCase() === 'aistudio' ? 'Google AI Studio' : 'ElevenLabs';
-  return `Voiceover text is for ${p}: plain sentences with natural commas and full stops. No timestamps, no stage directions, no speaker names.`;
+  return `Your say lines become the ${p} voiceover script: plain spoken sentences with natural commas and full stops. No timestamps, no stage directions, no speaker names inside say.`;
 }
 
 /** Cut a written narration into `n` parts of nearly equal length at sentence ends. */
@@ -372,21 +374,65 @@ export function sliceScript(script, n) {
   return out;
 }
 
+/* ---------- long videos: the story map and the retention engine ---------- */
+
+/** What each part of a long video is FOR, so the middle never goes flat. role: open | rise | twist | low | climb | payoff */
+export function partRole(k, of) {
+  if (of <= 1) return { role: 'whole', title: 'a complete story', job: 'hook, build, turn, payoff' };
+  if (k === 1) return { role: 'open', title: 'HOOK AND SETUP', job: 'start in the middle of the most striking moment; show who wants what and the first obstacle; end on a cliffhanger' };
+  if (k === of) return { role: 'payoff', title: 'CLIMAX AND PAYOFF', job: 'the biggest confrontation, the truth revealed, every open question answered, then one line that makes people rewatch or follow; no summary of the video' };
+  const u = (k - 1) / (of - 1);
+  if (u < 0.4) return { role: 'rise', title: 'ESCALATION', job: 'the obstacle gets bigger, a new person or place enters, the stakes rise, one small win that costs something' };
+  if (u < 0.62) return { role: 'twist', title: 'MIDPOINT TWIST', job: 'a surprise that changes what the viewer believed; the goal changes or a secret comes out' };
+  if (u < 0.85) return { role: 'low', title: 'LOWEST POINT', job: 'everything seems lost, a betrayal or a failure, the quietest and most emotional scenes, then one spark of hope' };
+  return { role: 'climb', title: 'THE CLIMB', job: 'the hero acts with a new plan, the pace speeds up, the final fight or test is set up' };
+}
+
+const DEVICES = ['a big number or fact slamming onto the screen', 'a sticky note with a rule or lesson', 'a two-column comparison (before / after, them / us)', 'a map or route drawn as the person moves', 'a flashback in a different colour mood', 'a joke or a funny reaction shot', 'a question asked straight to the viewer', 'a time jump with a date label', 'a prop that appears and is used', 'a rumour or message popping up on a phone', 'a crowd reacting', 'a weather or lighting change that matches the feeling'];
+
+/** The rules that keep a 3, 10, 20 or 30 minute video as good in minute 25 as in second 3. */
+export function longformBlock(plan, k = 1, { api = false, narrated = false } = {}) {
+  const of = plan.parts.length;
+  if (of <= 1) return '';
+  const r = partRole(k, of), p = plan.parts[k - 1] || plan.parts[0];
+  // one request writes every part (pasted prompt), or one request per part (the app calling a model itself)
+  const all = !api;
+  const map = plan.parts.map((q) => { const x = partRole(q.index, of); return `  Part ${q.index}/${of} (${Math.round(q.sec)} s): ${x.title}: ${x.job}${!all && q.index === k ? '   <- THIS PART' : ''}`; }).join('\n');
+  const mid = Math.round(p.beats / 2);
+  return `LONG VIDEO: ${Math.round((plan.totalSec / 60) * 10) / 10} MINUTES. EVERY MINUTE MUST BE AS GOOD AS THE FIRST (this video is judged by its worst minute, not its best):
+STORY MAP (plan the whole story along this map; keep to it):
+${map}
+${all ? 'IN EVERY PART:' : `THIS PART IS "${r.title}": ${r.job}.`}
+- NO RUSHING AND NO SHORTCUTS: every part gets exactly the same care, detail and ${p.beats} full beats as part 1. Never summarise ("and then years passed", "after many days"): show the moment. The last beat of the last part is as drawn, acted and filmed as beat 1.
+- RE-HOOK: ${all ? 'the first beat of every part after part 1 opens on a NEW striking moment that follows the last cliffhanger. Do not recap, do not say "previously".' : k === 1 ? 'beat 1 is the hook (see above).' : 'beat ' + p.firstBeat + ' opens on a NEW striking moment that follows the last cliffhanger (a line, a shock, a reveal). Do not recap, do not say "previously".'}
+- ${all ? 'The last beat of every part except the last is a CLIFFHANGER (a question, a threat, a reveal cut short); the last part ends on the payoff.' : k === of ? 'The last beat is the payoff and the final line; no cliffhanger.' : 'The last beat of this part is a CLIFFHANGER: a question, a threat, a reveal cut short. The next part starts right there.'}
+- A PATTERN INTERRUPT every 4 to 5 beats (so the eye never gets used to the rhythm). Rotate through these, never the same one twice in a row: ${DEVICES.slice((k * 3) % DEVICES.length).concat(DEVICES.slice(0, (k * 3) % DEVICES.length)).slice(0, 8).join('; ')}.
+- NEW EVERY PART: at least one new location, one new prop or visual idea, one new emotion for the hero, and one callback to something planted earlier (a line, an object, a joke). Never use the same location for more than 3 beats in a row, and do not reuse an opening shot.
+- EVERY BEAT CHANGES SOMETHING: someone decides, learns, loses, wins or lies. If a beat only explains, turn it into a scene: somebody does it, argues about it or sees it.
+- ${narrated ? 'A REACTION SHOT in at least every other beat (someone reacts on the face to what just happened)' : 'DIALOGUE AND REACTION in at least every other beat (a spoken line, a quick answer, a reaction shot)'}, the energy rises and falls (fast burst, one calm beat, fast burst), and the middle of every part (around beat ${mid} of it) is a mini-peak (a laugh, a gasp or a hit).
+- OPEN LOOPS: keep two or three questions unanswered for the viewer (who did it, will she make it, what is in the box) and answer an old one only when you open a new one.
+- Keep every character looking and sounding the same all through (same CAST lines, same manner).`;
+}
+
 function partsBlock(plan, { partIndex = 1, api = false } = {}) {
   const p = plan.parts[partIndex - 1] || plan.parts[0];
   if (plan.parts.length === 1) {
-    return `LENGTH: ${plan.totalSec} seconds = exactly ${p.beats} beats of about ${BEAT_SEC} s, about ${p.words} spoken words in total. The d values must add up to ${plan.totalSec}.`;
+    return `LENGTH: ${plan.totalSec} seconds = exactly ${p.beats} beats of about ${BEAT_SEC} s, about ${p.words} spoken words in total (about ${Math.round(p.words / Math.max(1, p.beats))} words per beat). The beats (their words) must add up to ${plan.totalSec} seconds.`;
   }
   if (api) {
-    return `LENGTH: the whole video is ${plan.totalSec} seconds (${plan.totalBeats} beats) written in ${plan.parts.length} parts. THIS REQUEST IS PART ${p.index} OF ${p.of} ONLY: beats ${p.firstBeat} to ${p.lastBeat} (${p.beats} beats), ${p.sec} s, about ${p.words} words. The d values of this part must add up to ${p.sec}.${p.index > 1 ? ' Write ONLY the CAST lines and the beats: no movie(), no voiceover(), no thumbnail().' : ''}`;
+    return `LENGTH: the whole video is ${plan.totalSec} seconds (${plan.totalBeats} beats) written in ${plan.parts.length} parts. THIS REQUEST IS PART ${p.index} OF ${p.of} ONLY: beats ${p.firstBeat} to ${p.lastBeat} (${p.beats} beats), ${p.sec} s, about ${p.words} words. The beats of this part must add up to ${p.sec} seconds.${p.index > 1 ? ' Write ONLY the CAST lines, your SETS / SVGS for this part and the beats: no movie(), no voiceover(), no thumbnail().' : ''}`;
   }
   const rows = plan.parts.map((q) => `  PART ${q.index} of ${q.of}: beats ${q.firstBeat} to ${q.lastBeat} (${q.beats} beats), ${q.sec} s, about ${q.words} words`).join('\n');
   return `LENGTH: ${plan.totalSec} seconds (${Math.round((plan.totalSec / 60) * 10) / 10} minutes) = ${plan.totalBeats} beats, written in ${plan.parts.length} parts so nothing gets cut off:
 ${rows}
-- Write PART 1, then go straight on to PART 2 and the rest in the same reply. Do NOT stop and do NOT wait for me to say NEXT. Each part is its own separate code block with a one-line label above it ("Part 1 of ${plan.parts.length}"). Only if your reply is cut off by your own length limit, I will say "continue": then carry on with the very next part, never repeating one. The story continues without repeating anything.
+- STORY BIBLE FIRST: Part 1 starts (after movie() and the CAST lines) with one comment: /* STORY BIBLE: Part 1 = ... | Part 2 = ... | ... | Part ${plan.parts.length} = ... (one line each: what happens, where, the cliffhanger) */. Plan the WHOLE story there before beat 1, then keep to it, so part ${plan.parts.length} pays off what part 1 set up.
+- Write ALL ${plan.parts.length} parts in this one answer, one straight after the other. Do NOT stop after a part, do NOT wait for me to say NEXT. NEVER ask me a question and never ask "shall I continue?". The moment Part k ends, Part k+1 begins.
 - First line of every part is exactly: // === ANIMATO BATCH k OF ${plan.parts.length} === (k = the part number).
-- Part 1 has movie(), voiceover() and thumbnail(). Parts 2 and later have NONE of those three.
-- Copy the CAST lines unchanged at the top of every part so every part works on its own.`;
+- Part 1 has movie() and thumbnail(). Parts 2 and later have neither. Nobody writes voiceover(): the app builds the voiceover from the say lines.
+- Copy the CAST lines unchanged at the top of every part, and define the SETS / SVGS each part uses inside that part, so every part works on its own.
+- Every part has its full ${plan.parts[0].beats} beats with the same detail, shots, faces and drawings as Part 1. Never shorten, merge or summarise a part to fit.
+- If your own length limit cuts you off, stop at the end of a complete beat line. When I say "continue", carry on with the very next beat (never repeat one) in a new block whose first line is the same // === ANIMATO BATCH k OF ${plan.parts.length} === line.
+- After the very last part write exactly one line: ALL ${plan.parts.length} PARTS DONE. If that line is missing, I know you were cut off.`;
 }
 
 /**
@@ -432,8 +478,8 @@ export function buildGuidedPrompt({
   const brief = [
     `- TITLE: ${title || '(invent a title that makes people curious)'}`,
     hasScript ? '' : `- IDEA: ${idea || '(invent a gripping story with a surprising turn)'}`,
-    `- CAST: ${cast || '(invent 2 to 3 characters with different looks and clear roles)'}`,
-    `- SETTING: ${setting || '(pick locations from the LOCATIONS list that fit the story)'}`,
+    `- CAST: ${cast || '(invent 2 to 3 characters with clear roles: people, animals or creatures, exactly what the idea needs)'}`,
+    `- SETTING: ${setting || '(the places the story needs: draw them as your own SETS, or use the LOCATIONS words)'}`,
     `- AUDIENCE: ${audience}   TONE: ${tone}   FORMAT: ${formatLabel}`,
     extra ? `- EXTRA DIRECTIONS: ${extra}` : '',
   ]
@@ -466,17 +512,17 @@ ${String(castText || kit.cast.join('\n')).trim()}
     ? `FILE SKELETON FOR THIS PART:
 // === ANIMATO BATCH ${k} OF ${of} ===
 CAST.hero = {...};   // the same lines as above, unchanged
+SETS.x = '...'; SVGS.y = '...';   // the drawings this part uses
 beat({...});         // one line per beat of this part
 // END OF FILE`
     : `FILE SKELETON (copy this order exactly):
 // === ANIMATO BATCH ${k} OF ${of} ===
 /* PLAN: one line per beat: number, seconds, location, what happens. Total must equal ${part.sec}. */
 movie({title:'...', aspect:'${tall ? '9:16' : '16:9'}'${kit.movieChar}});
-voiceover({text:'the full narration of this part', mode:'own'});
-CAST.hero = {...};   // one line per character, 2 to 4 characters${tall ? '' : "\nthumbnail({...});   // after the CAST lines: one big title card + one icon + the hero (see the example)"}
-storyboard([...]);   // the plan FIRST: one entry per beat (what is said, what we see, what each person does, what you must draw)
+CAST.hero = {...};   // one line per character, 2 to 4 characters${of > 1 ? "\n/* STORY BIBLE: Part 1 = ... | Part 2 = ... | ... */   // the whole story, planned before beat 1" : ''}${tall ? '' : "\nthumbnail({...});   // after the CAST lines: one big title card + one icon + the hero (see the example)"}
+storyboard([...]);   // the plan FIRST: one short entry per beat (what we see, what each person does, the shots, what you must draw)
 SETS.x = '...'; SVGS.y = '...';   // your own sets and drawings for this story
-beat({...});         // one line per beat, built one by one and checked against its storyboard entry
+beat({...});         // one line per beat, built one by one and checked against its storyboard entry (with its shot track)
 // END OF FILE`;
 
   const answerRule = api
@@ -484,27 +530,27 @@ beat({...});         // one line per beat, built one by one and checked against 
 1. Reply with the complete file only: plain JavaScript, ideally inside one \`\`\`js block. No explanation, no questions, no text before or after.
 2. Straight quotes only. Every beat written out in full.
 ${platformLine(voPlatform)}`
-    : `HOW YOU ANSWER (this overrides any habit you have):
-1. Reply with exactly TWO code blocks and nothing else: first a \`\`\`js block holding the complete file, then a \`\`\`text block holding the voiceover (one paragraph per beat, blank line between paragraphs, the same words as every say).
-2. Do not ask me questions. Do not explain. Do not say "Here is" or "Sure". No text before the first block or after the last one${of > 1 ? ' (except the one "Part k of n done" line)' : ''}.
-3. Do not use files, downloads, canvas or attachments. Everything goes in the code blocks.
-4. The code is plain JavaScript that the app runs. Straight quotes only.
+    : `HOW YOU ANSWER (this overrides any habit you have and any other delivery rule in this message):
+1. Start with the code at once. No questions, no plan in the chat, no "Here is", no "Sure", no "shall I continue?".
+2. IF YOU CAN CREATE FILES (ChatGPT with its file or code tool, Claude, Gemini with code execution): write ${of > 1 ? `every part as its own file (scene-file-1.txt to scene-file-${of}.txt) and put all of them in ONE zip named scene-files.zip` : 'the whole film in one file named scene-file.txt'}, then reply with the download link and one line: "Open Code to stickman, tap Add the AI's file(s), pick ${of > 1 ? 'the zip' : 'this file'}." The files hold only the code.
+3. IF YOU CANNOT CREATE FILES: ${of > 1 ? `print Part 1 in its own \`\`\`js code block, then Part 2 in the next \`\`\`js block, and so on until Part ${of}, all in this reply, with only a one-line label above each block ("Part 2 of ${of}")` : 'print the whole file in one \`\`\`js code block'}. Everything stays inside the code block${of > 1 ? 's' : ''}; nothing else in the reply${of > 1 ? ' except the labels and the final ALL PARTS DONE line' : ''}.
+4. The code is plain JavaScript that the app runs. Straight quotes only. Do not write voiceover() and do not add a separate voiceover block: the app builds the voiceover script from your say lines.
 ${platformLine(voPlatform)}`;
 
   const check = `CHECK BEFORE YOU SEND (silently, fix anything that fails):
-[ ] Exactly ${part.beats} beat lines for this part, d values add up to ${part.sec} (+/- 2 s).
-[ ] Every d equals words in say / 2.65 + 0.55.
+[ ] Exactly ${part.beats} beat lines${of > 1 ? ' in every part' : ''}, about ${part.words} spoken words${of > 1 ? ' per part' : ''} (${part.sec} s).
 [ ] storyboard([...]) comes before the first beat, one entry per beat, and every beat shows exactly what its entry (and its words) say.
+[ ] Every beat has shot:'...' with 2 to 4 named shots, cut on its words (@"word"), and the person each shot names is in that beat's a:[...].
+[ ] Every verb in say is acted on its word (moves), every feeling is on the face on its word (face), every object it names is drawn (item, svg, hold, wear).
 [ ] Every built-in word is spelled exactly as listed; every own set or drawing you use (s:'myset', ['svg','mything',...]) is defined above as SETS.myset / SVGS.mything.
 [ ] No side views. Walking people face the camera and the camera follows them.
 [ ] Every person seen from the front has face:'...' with at least 2 different EMOTIONS in a beat longer than 4 s.
-[ ] Every beat has at least 3 visual elements that illustrate its words (drawn or built-in) and the camera differs from the beat before.
 [ ] No apostrophe inside a single-quoted string (use double quotes for those).
-${api ? '' : '[ ] The voiceover block has the same words as all the say fields, in the same order.\n[ ] Nothing outside the two code blocks.'}`.trim();
+${api ? '' : `[ ] ${of > 1 ? `All ${of} parts are written, each complete, and the last line is ALL ${of} PARTS DONE.` : 'The whole file is there, down to // END OF FILE.'}\n[ ] Nothing outside the code (or the zip link).`}`.trim();
 
   const finalLine = api
     ? `FINAL REMINDER: reply with the file only. Write ${of > 1 ? `part ${k} of ${of}` : 'the whole video'} now.`
-    : `FINAL REMINDER: reply with the \`\`\`js file and the \`\`\`text voiceover only. ${of > 1 ? 'Write part 1 only, then stop. ' : ''}Start now.`;
+    : `FINAL REMINDER: ${of > 1 ? `write all ${of} parts now, one after the other, without stopping (zip if you can make files, otherwise one \`\`\`js block per part)` : 'write the whole file now (a file if you can make files, otherwise one \`\`\`js block)'}. Start now.`;
 
   return `${GUIDED_MARKER} · works with ChatGPT, Gemini, Claude or any AI
 
@@ -512,7 +558,7 @@ YOUR JOB: write ONE JavaScript file that Animato turns into an animated ${tall ?
 
 ${ctBlock ? ctBlock + '\n\n' : ''}${SCENE_BY_SCENE}
 
-${FREEDOM}
+${longformBlock(plan, k, { api, narrated: contentType !== 'movie' }) ? longformBlock(plan, k, { api, narrated: contentType !== 'movie' }) + '\n\n' : ''}${FREEDOM}
 
 ${answerRule}
 
@@ -525,6 +571,8 @@ ${skeleton}
 
 ${TEMPLATE}
 
+${shotRule({ tall })}
+
 ${PROPS}
 
 ${vocabBlock(kit)}
@@ -532,8 +580,6 @@ ${vocabBlock(kit)}
 ${GUIDED_FACES}
 
 ${GUIDED_ACTING}
-
-${directorRule()}
 
 ${tall ? VERTICAL_RULES + '\n\n' : THUMBNAIL_NOTE + '\n\n'}${STORY_RULES}
 
@@ -567,7 +613,9 @@ ${SCENE_BY_SCENE}
 
 ${FREEDOM}
 
-OUTPUT RULES: answer with the file only (no chat, no explanation, no markdown outside one code block if you use one). Plain JavaScript, straight quotes only. Never write placeholders such as "// ... more". Every beat is written out in full.
+LONG VIDEOS (3 to 30 minutes): every minute must be as good as the first. Never rush or summarise; show every moment as a full scene. Re-hook at the start of every part, end each part (except the last) on a cliffhanger, change something every beat, add a pattern interrupt (number slam, sticky note, comparison, flashback, joke, time jump) every 4 to 5 beats, bring a new place, prop and feeling into every part, keep 2 or 3 open questions alive, and keep the same characters all through.
+
+OUTPUT RULES: answer with the file only (no chat, no explanation, no markdown outside one code block if you use one). Plain JavaScript, straight quotes only. Never write placeholders such as "// ... more". Every beat is written out in full. Never write voiceover(): the app builds it from the say lines.
 
 ${TEMPLATE}
 
@@ -579,7 +627,7 @@ ${GUIDED_FACES}
 
 ${GUIDED_ACTING}
 
-${directorRule()}
+${shotRule({ tall })}
 
 ${tall ? VERTICAL_RULES + '\n\n' : ''}${STORY_RULES}
 

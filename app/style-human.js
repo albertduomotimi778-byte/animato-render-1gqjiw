@@ -556,8 +556,12 @@ export function renderHuman(look, P, talk, mo, blk, view, uid, idx) {
   let browWord = explicit ? ex.brow : per.brow;
   if (Lk.mouth === undefined && exWord === '') mouthWord = per.rest;
   if (Lk.brow === undefined && exWord === '') browWord = per.brow;
-  const mood = MOOD_OF[mouthWord] || 'smile';
-  const wide = !!ex.wide || /^(shock|surprised|scared)$/.test(exWord);
+  // the acting face (public/expressions.js) also sets the MOUTH: a scared, sad or angry person no longer keeps their resting smile
+  const emo0 = P.emo && typeof P.emo === 'object' ? P.emo : null;
+  if (emo0 && typeof emo0.m === 'string' && emo0.m) mouthWord = emo0.m;
+  else if (emo0 && Number.isFinite(+emo0.smile)) mouthWord = +emo0.smile < -.25 ? 'frown' : +emo0.smile > .6 ? (mouthWord === 'grin' ? 'grin' : 'smile') : mouthWord;
+  const mood = emo0 && /^(scream|wobble|frown|wail|grit|snarl)$/.test(emo0.mf || '') ? 'sad' : (MOOD_OF[mouthWord] || 'smile');
+  const wide = !!ex.wide || /^(shock|surprised|scared)$/.test(exWord) || !!(emo0 && emo0.ek === 'wide');
   const happyEyes = (mouthWord === 'grin' && browWord === 'happy') || /^(laughing|laugh|love|wink)$/.test(exWord);
   const crying = exWord === 'cry' || exWord === 'crying' || exWord === 'sob';
   const closed = (Number.isFinite(+blk) ? +blk : 1) < .5 || exWord === 'sleepy' && hash01(Math.floor(T * 2)) < .5;
@@ -719,7 +723,11 @@ export function renderHuman(look, P, talk, mo, blk, view, uid, idx) {
   const neck = comp.neck;
   const pivotY = neck ? neck.transform.y + neck.height / 2 - 6 : G.headC.y + G.faceH * .5;
   const headDy = clamp01(hy * .9 + (per.post < 0 ? -per.post * 3 : 0) + lvl * Math.abs(sin(T * 5.1 + ph)) * .8, -6, 16);
-  const headXf = `translate(${f2(dxh)} ${f2(headDy)}) translate(0 ${f2(pivotY)}) rotate(${f2(roll)}) translate(0 ${f2(-pivotY)})`;
+  // animation proportions: the generator's fashion-figure head (about 1/8.5 of the body) is read as tiny on a phone, so faces could not act.
+  // The head (and the hair behind it) is drawn a little bigger around the neck, like character animation does (about 1/7).
+  const HS = Number.isFinite(+look?.headScale) ? Math.max(.85, Math.min(1.35, +look.headScale)) : 1.17;
+  const headXf = `translate(${f2(dxh)} ${f2(headDy)}) translate(0 ${f2(pivotY)}) rotate(${f2(roll)}) scale(${f2(HS)}) translate(0 ${f2(-pivotY)})`;
+  const hairBackXf = `translate(${f2(dxh)} ${f2(headDy)}) translate(0 ${f2(pivotY)}) scale(${f2(HS)}) translate(0 ${f2(-pivotY)})`;
   const partXf = (id) => {
     const p = comp[id], t = p.transform;
     const ox = p.width * ((t.anchorX ?? 50) / 100 - .5), oy = p.height * ((t.anchorY ?? 50) / 100 - .5);
@@ -758,7 +766,7 @@ export function renderHuman(look, P, talk, mo, blk, view, uid, idx) {
       let sid;
       if (id === 'mouth') sid = mouthSym; else { const s = e.sym[id]; if (!s) continue; sid = s.id; }
       let xf = partXf(id);
-      if (p.parentId === 'headGroup') xf = headXf + ' ' + xf;
+      if (p.parentId === 'headGroup') xf = headXf + ' ' + xf; else if (id === 'hair_back') xf = hairBackXf + ' ' + xf;
       xf = upperXf + ' ' + xf;
       body += `<use href="#${sid}" transform="${xf}"${op < .995 ? ` opacity="${f2(op)}"` : ''}/>`;
     }
@@ -774,7 +782,7 @@ export function renderHuman(look, P, talk, mo, blk, view, uid, idx) {
     const isLeg = /^leg/.test(id);
     const inHead = p.parentId === 'headGroup';
     let xf = partXf(id);
-    if (inHead) xf = headXf + ' ' + xf;
+    if (inHead) xf = headXf + ' ' + xf; else if (id === 'hair_back') xf = hairBackXf + ' ' + xf;
     if (!isLeg) xf = upperXf + ' ' + xf;
     const kd = isLeg ? kneeDeg[id] || 0 : 0;
     if (kd > 1.5) {

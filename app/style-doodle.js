@@ -340,7 +340,8 @@ export function renderDoodle(look, P, talk, mo, blk, view, uid, idx) {
   const V = view === 'side' ? 'side' : view === 'back' ? 'back' : 'front', S = V === 'side';
   const r = d.headR, tH = d.torsoH; let lh = d.legH;
   lh = lh * 1.48; d.cy = -(lh + tH + r * .95);
-  const sy = -(lh + tH), swd = r * .55, U = r * .62, hw = lh * .3, sd0 = d.seed, L = lh / 2;
+  // arm length follows the BODY (hands hang near mid-thigh), not the head: a big head used to give arms that reached the floor
+  const sy = -(lh + tH), swd = r * .55, U = Math.min(r * .62, (tH + lh * .42) * .52), hw = lh * .3, sd0 = d.seed, L = lh / 2;
   const a = Array.isArray(P.a) ? P.a : [34, -36, 34, -36];
   const l = Array.isArray(P.l) ? P.l : [0, 0, 0, 0];
   const kb = Math.max(0, +P.k || 0), bend = kb > 1;
@@ -369,8 +370,12 @@ export function renderDoodle(look, P, talk, mo, blk, view, uid, idx) {
       const sh = [0, sY], e = [sin(A1) * U, sY + cos(A1) * U], hd = [e[0] + sin(A2) * U, e[1] + cos(A2) * U];
       return { sh, e, hd, far: !i };
     }
-    const sh = [sg * swd, sY], A1 = ua * D2R, A2 = fa * D2R;
-    const e = [sh[0] + sg * sin(A1) * U, sY + cos(A1) * U], hd = [e[0] + sg * sin(A2) * U, e[1] + cos(A2) * U];
+    // rubber-hose arms: short and natural when they hang, longer when raised, so a wave or a point clears the big head and reads
+    const raise = cl((Math.abs(ua) - 55) / 95, 0, 1), Ua = U * (1 + .75 * raise);
+    // the head is big: a raised arm opens out to the side (instead of straight up across the face) so the hand is seen beside the head
+    const uaD = ua > 90 ? 90 + (ua - 90) * .45 : ua, faD = fa > 90 ? 90 + (fa - 90) * .6 : fa;
+    const sh = [sg * swd, sY], A1 = uaD * D2R, A2 = faD * D2R;
+    const e = [sh[0] + sg * sin(A1) * Ua, sY + cos(A1) * Ua], hd = [e[0] + sg * sin(A2) * Ua, e[1] + cos(A2) * Ua];
     return { sh, e, hd, far: false };
   });
 
@@ -398,7 +403,8 @@ export function renderDoodle(look, P, talk, mo, blk, view, uid, idx) {
   arms.forEach((am, i) => {
     const pts = [am.sh, am.e, am.hd];
     const seg = halo(pts, 1.5) + rs(pts, { seed: sd0 + (i ? 1 : -1) * 61, wobble: .7, width: 2.8, alpha: S && am.far ? .5 : .8 }) + dot(am.hd[0], am.hd[1], 4, d.skin, .95);
-    if (am.hd[1] < sy - 4) armsFront += seg; else up += seg;
+    // a raised hand goes in front of the head only when it is out beside it; a hand that would cross the face (a wave, a scratch) passes behind
+    if (am.hd[1] < sy - 4 && (S || Math.abs(am.hd[0]) > r * .6)) armsFront += seg; else up += seg;
   });
   // head
   const closed = (Number.isFinite(+blk) ? +blk : 1) < .5;

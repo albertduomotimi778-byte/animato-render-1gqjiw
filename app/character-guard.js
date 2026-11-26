@@ -9,6 +9,10 @@
 import { EXPRESSION_MARKER, expressionRule } from './expressions.js';
 import { ACTING_MARKER, actingRule } from './acting.js';
 import { DIRECTOR_MARKER, directorRule } from './director.js';
+import { SHOTS_MARKER, shotRule } from './shots.js';
+import { ART_MARKER, artDirectionRule } from './engage.js';
+import { creatureRule } from './creatures.js';
+import { CAST_MARKER, castRule } from './cast-identity.js';
 
 export const CHARACTER_MARKER = 'CHARACTER GUARANTEE';
 export { EXPRESSION_MARKER, expressionRule, ACTING_MARKER, actingRule };
@@ -82,6 +86,7 @@ export function adaptPromptForCharacters(text, selected = 'original', opts = {})
   let src = String(text ?? '');
   if (!src) return src;
   if (!src.includes(CHARACTER_MARKER)) src = src + '\n\n' + characterRule(selected);
+  if (!src.includes(CAST_MARKER)) src = src + '\n\n' + castRule();
   src = withFacialActing(src, selected);
   return withCharacterSize(src, selected, opts.aspect);
 }
@@ -94,7 +99,11 @@ export function withFacialActing(text, style = 'original') {
   if (!out.includes(EXPRESSION_MARKER)) out = out.trimEnd() + '\n\n' + expressionRule(style);
   // the short body-acting card goes last: models follow the end of a long prompt best
   if (!out.includes(ACTING_MARKER)) out = out.trimEnd() + '\n\n' + actingRule();
-  if (!out.includes(DIRECTOR_MARKER)) out = out.trimEnd() + '\n\n' + directorRule();
+  // guided prompts carry the named-shot block instead (it covers the director's rule in fewer words)
+  if (!out.includes(DIRECTOR_MARKER) && !out.includes(SHOTS_MARKER)) out = out.trimEnd() + '\n\n' + directorRule();
+  if (!out.includes(SHOTS_MARKER)) out = out.trimEnd() + '\n\n' + shotRule({ tall: /aspect:\s*'9:16'|VERTICAL 9:16/.test(out) });
+  if (!out.includes(ART_MARKER)) out = out.trimEnd() + '\n\n' + artDirectionRule();
+  if (!out.includes('ANIMALS AND CREATURES (')) out = out.trimEnd() + '\n\n' + creatureRule();
   return out;
 }
 
@@ -207,6 +216,7 @@ export function guardScenes(SC, opts = {}) {
     sc.characters = Array.isArray(sc.characters) ? sc.characters.filter((c) => c && typeof c === 'object') : [];
     sc.characters.forEach((c) => fixOne(c, sc, n));
     if (visibleIn(sc)) return;
+    if (sc.chapter === true && !sc.characters.length) return;   // a black chapter card is a title, not a scene: nobody stands behind the words
     const had = sc.characters.length;
     // nearest scene that does have someone to show: before, then after
     let src = null;

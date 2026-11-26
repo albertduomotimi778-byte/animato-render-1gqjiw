@@ -35,27 +35,91 @@ var iv=setInterval(function(){
 },500);
 })();</script>
 <script>(function(){
-/* Animato bridge. Only activates when framed inside Animato Studio Pro (animatostudiopro.com). */
-/* The allowed parent pages come from /embed-guard.js (the ALLOWED_EMBED_ORIGINS setting), never from a list written here. */
+/* SAVING FILES ON EVERY DEVICE (Android, iPhone, iPad, desktop, in-app browsers).
+   Every file the app saves (video, prompt, scene file, voiceover, thumbnail, project zip) is an <a download> with a blob, and it all comes here:
+   1. Inside Animato Studio Pro the file is handed to the Animato page ('stickman:download'), so the download comes from Animato's address
+      (embed lock, see EMBED_LOCK.md). The allowed parent pages come from /embed-guard.js, never from a list written here.
+   2. iPhone, iPad and in-app browsers (Instagram, TikTok, Facebook, WebViews) cannot save a blob download reliably, so they get the system
+      share sheet ("Save Video", "Save to Files", Drive, WhatsApp...) straight from the tap.
+   3. If Animato does not answer, or the file is ready long after the tap (a video export), a small "Your file is ready" sheet appears with a
+      Save button: a fresh tap is what browsers require before they let a page save or share a file.
+   Blobs are remembered when their address is made, so a caller that frees the address right after the click can never break a save
+   (the old bridge re-read the address later and failed when it was already freed). */
 var parentOrigin=(window.__EMBED&&window.__EMBED.allowed&&window.__EMBED.parent)||"";
-if(!parentOrigin||window.top===window.self)return;
+var framed=!!parentOrigin&&window.top!==window.self;
 var origClick=HTMLAnchorElement.prototype.click,origDispatch=HTMLAnchorElement.prototype.dispatchEvent,pending={};
+var UA=navigator.userAgent||"",IOS=/iP(hone|ad|od)/.test(UA)||(/Macintosh/.test(UA)&&navigator.maxTouchPoints>1),ANDROID=/Android/i.test(UA);
+var INAPP=/FBAN|FBAV|FB_IAB|Instagram|Line\/|TikTok|musical_ly|BytedanceWebview|Snapchat|Twitter|; wv\)|WebView/i.test(UA);
+var BLOBS=new Map(),oCreate=URL.createObjectURL,oRevoke=URL.revokeObjectURL;
+URL.createObjectURL=function(o){var u=oCreate.call(URL,o);try{if(o instanceof Blob){BLOBS.set(u,o);if(BLOBS.size>80)BLOBS.delete(BLOBS.keys().next().value)}}catch(e){}return u};
+URL.revokeObjectURL=function(u){setTimeout(function(){BLOBS.delete(u);try{oRevoke.call(URL,u)}catch(e){}},90000)};
+var lastTap=0;["pointerdown","touchstart","keydown","click"].forEach(function(t){addEventListener(t,function(e){if(e.isTrusted!==false)lastTap=Date.now()},true)});
+function fresh(){var ua=navigator.userActivation;if(ua&&typeof ua.isActive==="boolean")return ua.isActive;return Date.now()-lastTap<4000}
 window.__ANIMATO_ACCESS=null;
 function post(m){try{window.parent.postMessage(m,parentOrigin);return true}catch(e){return false}}
 function say(msg){try{if(typeof window.toast==="function"){window.toast(msg);return}}catch(e){}try{console.warn(msg)}catch(e){}}
-window.addEventListener("message",function(e){var d=e.data;if(e.origin!==parentOrigin||!d)return;
-  if(d.type==="animato:download-ack"&&pending[d.id]){clearTimeout(pending[d.id]);delete pending[d.id]}
-  else if(d.type==="animato:stickman-access"){window.__ANIMATO_ACCESS=d;try{var he=document.getElementById("herr");if(he&&d.allowed!==false&&/free use for today/i.test(he.textContent||""))he.textContent=""}catch(x){}}});
-function send(id,name,blob,tries){
-  var counts=/^(video|audio|image)\//i.test(blob&&blob.type||"");
-  pending[id]=setTimeout(function(){delete pending[id];if(tries<3)send(id,name,blob,tries+1);else say("The file could not be saved. Please reopen Code to stickman from Animato Studio Pro and try again.")},2500);
-  if(!post({type:"stickman:download",id:id,name:name,blob:blob,counts:counts})){clearTimeout(pending[id]);delete pending[id];say("The file could not be saved. Please reopen Code to stickman from Animato Studio Pro and try again.")}
+function typeFor(name,blob){var t=blob&&blob.type||"";if(t)return t;var x=(String(name).split(".").pop()||"").toLowerCase();return({mp4:"video/mp4",webm:"video/webm",mov:"video/quicktime",txt:"text/plain",js:"text/plain",json:"application/json",zip:"application/zip",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",wav:"audio/wav",mp3:"audio/mpeg",html:"text/html"})[x]||"application/octet-stream"}
+function asFile(blob,name){try{return new File([blob],name,{type:typeFor(name,blob)})}catch(e){return null}}
+function canShareFile(f){try{return !!(f&&navigator.share&&navigator.canShare&&navigator.canShare({files:[f]}))}catch(e){return false}}
+/* the share sheet first where blob downloads do not work, a real download everywhere else */
+function shareFirst(){return IOS||INAPP}
+function localSave(blob,name,viaTap){
+  var f=asFile(blob,name);
+  if(shareFirst()&&canShareFile(f)){
+    if(!viaTap&&!fresh())return sheet(blob,name);
+    return navigator.share({files:[f],title:name}).then(function(){say("Saved "+name)}).catch(function(e){if(e&&e.name==="AbortError")return;sheet(blob,name)});
+  }
+  if(!viaTap&&!fresh()&&framed)return sheet(blob,name);   /* browsers block a download from a frame that was not just tapped */
+  try{var u=oCreate.call(URL,blob),a=document.createElement("a");a.href=u;a.download=name;a.rel="noopener";a.setAttribute("data-raw","1");a.style.display="none";document.body.appendChild(a);origClick.call(a);a.remove();setTimeout(function(){try{oRevoke.call(URL,u)}catch(e){}},90000);
+    if(IOS&&!canShareFile(f))setTimeout(function(){sheet(blob,name,true)},900)}
+  catch(e){sheet(blob,name)}
 }
+/* "Your file is ready": one big button, so the save happens inside a fresh tap. Open = the file in a new tab (long-press or Share there). */
+var SHEET=null;
+function sheet(blob,name,already){
+  try{if(SHEET)SHEET.remove()}catch(e){}
+  var d=document.createElement("div");SHEET=d;d.setAttribute("role","dialog");d.setAttribute("aria-modal","true");d.setAttribute("aria-label","Save your file");
+  d.style.cssText="position:fixed;left:0;right:0;bottom:0;top:0;z-index:99990;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);font:15px/1.45 -apple-system,system-ui,sans-serif";
+  var c=document.createElement("div");c.style.cssText="width:100%;max-width:420px;margin:0 10px calc(env(safe-area-inset-bottom,0px) + 12px);background:#1b1e26;color:#eceef3;border-radius:18px;padding:18px 18px 14px;box-shadow:0 18px 60px rgba(0,0,0,.5)";
+  var mb=(blob&&blob.size?" · "+(blob.size>1048576?(blob.size/1048576).toFixed(1)+" MB":Math.max(1,Math.round(blob.size/1024))+" KB"):"");
+  c.innerHTML='<b style="display:block;font-size:17px;margin-bottom:4px">'+(already?"Did it save?":"Your file is ready")+'</b><small style="display:block;color:#a7adba;margin-bottom:14px;word-break:break-all"></small>';
+  c.querySelector("small").textContent=name+mb+(already?" — if nothing was saved, tap Save again or Open it.":"");
+  var mk=function(t,primary){var b=document.createElement("button");b.type="button";b.textContent=t;b.style.cssText="display:block;width:100%;margin:8px 0 0;padding:13px;border-radius:12px;border:0;font:600 15px -apple-system,system-ui,sans-serif;"+(primary?"background:#e4cb9a;color:#15161b":"background:#2a2f3a;color:#eceef3");return b};
+  var f=asFile(blob,name),save=mk(shareFirst()&&canShareFile(f)?(/^video\//.test(typeFor(name,blob))?"Save video":"Save or share"):"Save to this device",true),open=mk("Open it (then Share or Save)",false),close=mk("Close",false);
+  save.onclick=function(){close.onclick();
+    if(shareFirst()&&canShareFile(f)){navigator.share({files:[f],title:name}).then(function(){say("Saved "+name)}).catch(function(e){if(!(e&&e.name==="AbortError"))sheet(blob,name,true)});return}
+    if(framed&&!ANDROID&&!IOS){send(Math.random().toString(36).slice(2),name,blob,1,true);return}
+    localSave(blob,name,true)};
+  open.onclick=function(){close.onclick();try{var u=oCreate.call(URL,blob);var w=window.open(u,"_blank");if(!w)location.href=u;setTimeout(function(){try{oRevoke.call(URL,u)}catch(e){}},300000)}catch(e){say("This browser cannot open the file. Try Save instead.")}};
+  close.onclick=function(){try{d.remove()}catch(e){}if(SHEET===d)SHEET=null};
+  d.onclick=function(e){if(e.target===d)close.onclick()};
+  c.appendChild(save);c.appendChild(open);c.appendChild(close);d.appendChild(c);(document.body||document.documentElement).appendChild(d);
+}
+window.addEventListener("message",function(e){var d=e.data;if(!framed||e.origin!==parentOrigin||!d)return;
+  if(d.type==="animato:download-ack"&&pending[d.id]){clearTimeout(pending[d.id].t);var p=pending[d.id];delete pending[d.id];if(p.done)p.done(true)}
+  else if(d.type==="animato:stickman-access"){window.__ANIMATO_ACCESS=d;try{var he=document.getElementById("herr");if(he&&d.allowed!==false&&/free use for today/i.test(he.textContent||""))he.textContent=""}catch(x){}}});
+/* one message, one quiet retry, then save it here: Animato being slow or old never loses a file */
+function send(id,name,blob,tries,viaTap){
+  var counts=/^(video|audio|image)\//i.test(blob&&blob.type||"");
+  var gest=viaTap||fresh();
+  pending[id]={done:null,t:setTimeout(function(){var p=pending[id];if(!p)return;delete pending[id];if(tries<2)send(id,name,blob,tries+1,gest);else localSave(blob,name,false)},tries<2?1800:2600)};
+  if(!post({type:"stickman:download",id:id,name:name,blob:blob,counts:counts,gesture:gest})){clearTimeout(pending[id].t);delete pending[id];localSave(blob,name,gest)}
+}
+function save(blob,name){
+  name=String(name||"download").replace(/[\\/:*?"<>|]+/g,"_").slice(0,120)||"download";
+  if(!(blob instanceof Blob)){say("The file could not be prepared. Please try again.");return}
+  /* iPhone, iPad, in-app browsers: the share sheet straight from the tap (Animato's own download cannot save there either) */
+  if(shareFirst()&&canShareFile(asFile(blob,name))){localSave(blob,name,false);return}
+  if(framed){send(Date.now().toString(36)+Math.random().toString(36).slice(2,7),name,blob,1,false);return}
+  localSave(blob,name,false);
+}
+window.__saveFile=save;
 function handle(a){
-  if(!a||!a.hasAttribute||!a.hasAttribute("download"))return false;
+  if(!a||!a.hasAttribute||!a.hasAttribute("download")||a.hasAttribute("data-raw"))return false;
   var href=a.href||"";if(!/^(blob:|data:)/i.test(href))return false;
-  var name=a.getAttribute("download")||"download";
-  fetch(href).then(function(r){return r.blob()}).then(function(blob){send(Math.random().toString(36).slice(2),name,blob,1)}).catch(function(){say("The file could not be prepared. Please try again.")});
+  var name=a.getAttribute("download")||"download",b=BLOBS.get(href);
+  if(b){save(b,name);return true}
+  fetch(href).then(function(r){return r.blob()}).then(function(blob){save(blob,name)}).catch(function(){say("The file could not be prepared. Please try again.")});
   return true;
 }
 HTMLAnchorElement.prototype.click=function(){if(handle(this))return;return origClick.apply(this,arguments)};
@@ -63,14 +127,14 @@ HTMLAnchorElement.prototype.dispatchEvent=function(ev){if(ev&&ev.type==="click"&
 document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[download]"):null;if(a&&handle(a)){e.preventDefault();e.stopImmediatePropagation()}},true);
 /* Called before a new animation opens: false when today's free use is already used (and no plan). */
 window.__animatoGuard=function(){var a=window.__ANIMATO_ACCESS;return !(a&&a.allowed===false)};
-post({type:"stickman:ready"});
+if(framed)post({type:"stickman:ready"});
 })();</script>
 <title>Animato Stickman Studio</title>
 <meta name="description" content="Professional YouTube 16:9 stickman and animation generator with AI scene creation and audio sync.">
 <meta property="og:title" content="Animato Stickman Studio">
 <meta property="og:description" content="Professional YouTube 16:9 stickman and animation generator with AI scene creation and audio sync.">
 <meta name="theme-color" content="#090b10">
-<script type="module">import * as Sync from '/sync.js';import * as Gen from '/generation.js';import * as CharUtils from '/character-builder-utils.js';import * as TranscribeAlign from '/transcribe-align.js';import * as Transcriber from '/transcriber-client.js';import * as CharEngine from '/character-engine.js';import * as CharStyles from '/character-styles.js';import * as BgMode from '/background-mode.js';import * as SendToAi from '/send-to-ai.js';import * as Motion from '/motion-polish.js';window.AnimatoMotion=Motion;import * as Face from '/expressions.js';window.AnimatoFace=Face;import * as Acting from '/acting.js';window.AnimatoActing=Acting;import * as Gaze from '/gaze.js';window.AnimatoGaze=Gaze;import * as PStage from '/portrait-stage.js';window.AnimatoPStage=PStage;import * as Director from '/director.js';window.AnimatoDirector=Director;import * as CharPack from '/character-pack.js';window.AnimatoCharPack=CharPack;import * as MyBg from '/my-backgrounds.js';import * as Alive from '/liveliness.js';import * as CT from '/content-types.js';import * as PM from '/projects.js';window.AnimatoPM=PM;window.AnimatoCT=CT;window.AnimatoAlive=Alive;window.AnimatoMyBg=MyBg;import * as PhotoTags from '/photo-tags.js';import * as PhotoStore from '/photo-store.js';import * as Team from '/production-team.js';window.AnimatoTeam=Team;window.AnimatoPhotoTags=PhotoTags;window.AnimatoPhotos=PhotoStore;window.AnimatoBg=BgMode;window.AnimatoSend=SendToAi;window.AnimatoCharStyles=CharStyles;window.AnimatoSync=Sync;window.AnimatoGen=Gen;window.AnimatoCharUtils=CharUtils;window.AnimatoTranscribeAlign=TranscribeAlign;window.AnimatoTranscriber=Transcriber;window.AnimatoCharEngine=Object.assign({},CharEngine,{formatCharacterDnaPrompt:(dna,style,hint)=>CharStyles.isNewStyle(style)?CharStyles.styleDirective(style):CharEngine.formatCharacterDnaPrompt(dna,style,hint)});import('/ai-sync.js').then(m=>{window.AnimatoAiSync=m;window.dispatchEvent(new Event('animato:ai-sync-ready'))}).catch(()=>{});import('/character-light.js').then(m=>{window.AnimatoLight=m}).catch(()=>{});import('/character-guard.js').then(m=>{window.AnimatoCharGuard=m;window.dispatchEvent(new Event('animato:char-guard-ready'))}).catch(()=>{});window.dispatchEvent(new Event('animato:char-engine-ready'));window.dispatchEvent(new Event('animato:bg-ready'));</script>
+<script type="module">import * as Sync from '/sync.js';import * as Gen from '/generation.js';import * as CharUtils from '/character-builder-utils.js';import * as TranscribeAlign from '/transcribe-align.js';import * as Transcriber from '/transcriber-client.js';import * as CharEngine from '/character-engine.js';import * as CharStyles from '/character-styles.js';import * as BgMode from '/background-mode.js';import * as SendToAi from '/send-to-ai.js';import * as Motion from '/motion-polish.js';window.AnimatoMotion=Motion;import * as Face from '/expressions.js';window.AnimatoFace=Face;import * as Acting from '/acting.js';window.AnimatoActing=Acting;import * as Gaze from '/gaze.js';window.AnimatoGaze=Gaze;import * as PStage from '/portrait-stage.js';import * as CastId from '/cast-identity.js';import * as NounIcons from '/noun-icons.js';import * as Depth from '/depth.js';import * as Scenery from '/scenery.js';window.AnimatoPStage=PStage;window.AnimatoCast=CastId;window.AnimatoNouns=NounIcons;window.AnimatoDepth=Depth;window.AnimatoScenery=Scenery;import * as Director from '/director.js';window.AnimatoDirector=Director;import * as Shots from '/shots.js';window.AnimatoShots=Shots;import * as Engage from '/engage.js';window.AnimatoEngage=Engage;import * as CharPack from '/character-pack.js';window.AnimatoCharPack=CharPack;import * as CharIK from '/character-ik.js';window.AnimatoIK=CharIK;import * as MyBg from '/my-backgrounds.js';import * as Alive from '/liveliness.js';import * as Cinema from '/cinema.js';import * as PartsGuide from '/parts-guide.js';import * as CT from '/content-types.js';import * as PM from '/projects.js';window.AnimatoPM=PM;window.AnimatoCT=CT;window.AnimatoAlive=Alive;window.AnimatoCinema=Cinema;window.AnimatoParts=PartsGuide;window.AnimatoMyBg=MyBg;import * as PhotoTags from '/photo-tags.js';import * as PhotoStore from '/photo-store.js';import * as Team from '/production-team.js';window.AnimatoTeam=Team;window.AnimatoPhotoTags=PhotoTags;window.AnimatoPhotos=PhotoStore;window.AnimatoBg=BgMode;window.AnimatoSend=SendToAi;window.AnimatoCharStyles=CharStyles;window.AnimatoSync=Sync;window.AnimatoGen=Gen;window.AnimatoCharUtils=CharUtils;window.AnimatoTranscribeAlign=TranscribeAlign;window.AnimatoTranscriber=Transcriber;window.AnimatoCharEngine=Object.assign({},CharEngine,{formatCharacterDnaPrompt:(dna,style,hint)=>CharStyles.isNewStyle(style)?CharStyles.styleDirective(style):CharEngine.formatCharacterDnaPrompt(dna,style,hint)});import('/ai-sync.js').then(m=>{window.AnimatoAiSync=m;window.dispatchEvent(new Event('animato:ai-sync-ready'))}).catch(()=>{});import('/character-light.js').then(m=>{window.AnimatoLight=m}).catch(()=>{});import('/character-guard.js').then(m=>{window.AnimatoCharGuard=m;window.dispatchEvent(new Event('animato:char-guard-ready'))}).catch(()=>{});window.dispatchEvent(new Event('animato:char-engine-ready'));window.dispatchEvent(new Event('animato:bg-ready'));</script>
 <style>:root{color-scheme:dark;--bg:#15171c;--fg:#e4e6eb;--mu:#98a0ad;--card:#1d2027;--card2:#242831;--line:#2e333d;--line2:#3d4350;--ac:#4f8cff;--acf:#fff;--wash:#12141a;--err:#f2897f;--ok:#6fcf97;--sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 :root[data-theme="light"]{color-scheme:light;--bg:#f2f3f5;--fg:#1c1f26;--mu:#5d6572;--card:#fff;--card2:#f6f7f9;--line:#dcdfe4;--line2:#c3c8d0;--ac:#1f5fd1;--acf:#fff;--wash:#eceef1;--err:#b3261e;--ok:#217a44}
 html{scroll-padding-top:env(safe-area-inset-top,0px);background:var(--bg)}
@@ -166,7 +230,7 @@ progress::-moz-progress-bar{background:var(--ac)}
 .packpanel .pkmeta{flex:1 1 140px;min-width:0}.packpanel .pkmeta b{display:block;font-size:13px;margin:0}.packpanel .pkmeta small{display:block;font-size:11.5px;color:var(--mu)}
 .packpanel .pkx{padding:6px 9px;font-size:12px;opacity:.8}.packpanel .pkitem.new{padding-right:8px}.packpanel .bgthumb{width:72px;height:41px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:none;background:#000}.packpanel .bgname{flex:1;min-width:130px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}.packpanel .bgname:focus{outline:none;border-color:var(--ac)}.packpanel .pkhint{display:block;margin:2px 2px 0;font-size:11.5px;color:var(--mu)}.mybgpanel{margin-top:8px}.packpanel .pkbtns{align-items:center}.packpanel .pkgrp{display:flex;gap:5px;margin-left:auto}.packpanel .pkbtns button.sm{font-size:11px;padding:4px 8px;border-radius:7px;color:var(--mu)}.packpanel .pkbtns button.sm:hover{color:var(--fg);border-color:var(--ac)}.packpanel .pkitem .pkdel{position:absolute;top:6px;right:6px;padding:4px 9px;font-size:11.5px;opacity:.75;transition:opacity .15s,background .15s,color .15s}.packpanel .pkitem:hover .pkdel,.packpanel .pkitem .pkdel:focus-visible{opacity:1}.packpanel .pkitem .pkdel:hover{background:#c0392b;border-color:#c0392b;color:#fff}.packpanel .pkitem.new{border-style:dashed}.packpanel .pkitem .pksave{margin-left:auto}.packpanel .pkbtns button.pri,.packpanel .pkitem button.pri{background:var(--ac);border-color:var(--ac);color:#fff}.packpanel .pkmsg{font-size:12px;line-height:1.4;color:var(--mu)}.packpanel .pkmsg.bad{color:#c0392b}
 .ownnote{border:1px solid var(--ac);background:color-mix(in srgb,var(--ac) 10%,var(--card));border-radius:8px;padding:12px;margin-top:10px;font-size:13px;line-height:1.5;color:var(--fg)}
-.ownnote b{display:block;margin-bottom:4px}.ownnote small{display:block;color:var(--mu);font-size:12px}
+.hub-how{list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:12px 0;padding:0}.hub-how li{border:1px solid var(--bd,#2a2f3a);border-radius:10px;padding:10px;background:var(--card)}.hub-how b{display:block;font-size:13px}.hub-how small{display:block;color:var(--mu);font-size:12px;margin-top:2px}.partsbox{border:1px solid #d9a23b;background:color-mix(in srgb,#d9a23b 12%,var(--card));border-radius:10px;padding:12px;margin-top:10px;font-size:13px;line-height:1.5}.partsbox[data-s=ok]{border-color:#3fa968;background:color-mix(in srgb,#3fa968 12%,var(--card))}.partsbox b{display:block;font-size:14px;margin-bottom:6px}.partsbox p{margin:8px 0}.partsbox textarea{width:100%;font-size:12px;margin-top:4px}.pc-chips{display:flex;flex-wrap:wrap;gap:5px}.pc-chip{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#3fa968;color:#fff}.pc-chip.miss{background:#c0392b}.ownnote b{display:block;margin-bottom:4px}.ownnote small{display:block;color:var(--mu);font-size:12px}
 .ownaudio{border:1px solid var(--line);background:var(--wash);border-radius:6px;padding:10px;margin-bottom:10px;display:grid;gap:6px}
 .ownaudio.need{border:2px solid var(--ac);background:color-mix(in srgb,var(--ac) 9%,var(--card))}
 .ownaudio-h{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -606,7 +670,8 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
 .pm-saved{display:flex;align-items:center;gap:6px;color:var(--ok);font-size:11.5px;padding:0 4px 10px}.pm-saved i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
 .pm-row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px;margin-bottom:10px;cursor:pointer;position:relative}
 .pm-row:hover{border-color:var(--line2)}
-.pm-th{width:84px;height:48px;border-radius:10px;flex:none;background:linear-gradient(135deg,var(--c1),var(--c2));display:grid;place-items:center;font-size:20px}
+.pm-th.pm-img{background-size:contain;background-position:center;background-repeat:no-repeat;background-color:#000;border:1px solid var(--line)}
+.pm-th{width:96px;height:54px;border-radius:10px;flex:none;background:linear-gradient(135deg,var(--c1),var(--c2));display:grid;place-items:center;font-size:20px}
 .pm-t{flex:1;min-width:0}.pm-t b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pm-t small{color:var(--mu);font-size:11.5px;display:block;margin-top:3px;line-height:1.5}
 .pm-tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line2);color:var(--mu);margin-right:4px}
@@ -706,21 +771,26 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
 
  <section id="landingHub">
   <div class="hub-head">
-   <h2>Make your animated video</h2>
-   <p>Choose where to start.</p>
+   <h2>Turn an idea into an animated video</h2>
+   <p>This app makes the video for you. You describe it, an AI (ChatGPT, Claude or Gemini) writes the scenes, and this app turns them into a finished animation you can download for TikTok or YouTube. No drawing and no editing skills needed.</p>
   </div>
+  <ol class="hub-how">
+   <li><b>1. Tell us your idea</b><small>Pick a character and describe the story.</small></li>
+   <li><b>2. Send it to an AI</b><small>One tap copies it and opens the AI. Paste and wait.</small></li>
+   <li><b>3. Bring the reply back</b><small>We build the animation. Add a voice, then download.</small></li>
+  </ol>
   <div class="hub-grid">
    <button type="button" class="hub-btn primary" data-hub="wizard">
-    <b>Wizard Prompt</b>
-    <small>Got an idea? Answer 3 quick steps and send it to your AI.</small>
+    <b>Start from an idea</b>
+    <small>Best for most people. Answer 3 quick questions. We prepare everything for you.</small>
    </button>
    <button type="button" class="hub-btn" data-hub="pro">
-    <b>Pro Builder</b>
-    <small>Got a script? Pick a look, paste it and send it to your AI.</small>
+    <b>I already have a script</b>
+    <small>Paste your own words and we animate them exactly as written.</small>
    </button>
    <button type="button" class="hub-btn" data-hub="import">
-    <b>Import TXT</b>
-    <small>Already have the AI's reply? Open it here and turn it into your video.</small>
+    <b>I already have the AI's reply</b>
+    <small>You asked an AI already? Open its reply (the TXT) here to get your video.</small>
    </button>
   </div>
 
@@ -828,9 +898,9 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
     </div><input type="hidden" id="duration" value="60 seconds">
     <div class="lbl">What are you making?</div>
     <div class="opts" data-ctype-group style="display:grid;gap:8px">
-     <button type="button" class="opt" data-ctype="movie"><b>Animated movie</b><small>Characters act the story and speak their own lines</small></button>
-     <button type="button" class="opt on" data-ctype="narration"><b>Narration animation</b><small>A voice tells it and the characters act it out</small></button>
-     <button type="button" class="opt" data-ctype="presenter"><b>Documentary (presenter)</b><small>A host talks on stage, others act it out behind</small></button>
+     <button type="button" class="opt" data-ctype="movie"><b>Cinematic movie</b><small>Characters speak and act, filmed like a real film (close-ups, camera angles, film lighting)</small></button>
+     <button type="button" class="opt on" data-ctype="narration"><b>Narration animation</b><small>A voice tells the story and the characters act out every word, shot by shot</small></button>
+     <button type="button" class="opt" data-ctype="presenter"><b>Storyteller in the scene</b><small>A host in the corner explains while the people in the scene act it out</small></button>
     </div>
     <div class="lbl">Background</div>
     <div class="opts grid2 fmtopts" style="grid-template-columns:1fr 1fr">
@@ -880,8 +950,8 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
     <textarea class="sendfallback" readonly rows="5" hidden aria-label="Your prompt. Copy everything in this box."></textarea>
     <ol class="nextsteps">
      <li><b>Tap a button.</b> We copy your prompt and open the AI.</li>
-     <li><b>Paste and send</b> in the AI, then wait for its reply.</li>
-     <li><b>Come back</b> and tap the button below to turn the reply into your video.</li>
+     <li><b>Paste and send</b> in the AI, then wait. If it stops before the end, just type <b>continue</b>.</li>
+     <li><b>Come back</b> with its zip or file, or copy its whole reply, and tap the button below.</li>
     </ol>
     <button type="button" class="p big" data-goto-import>I have the AI's reply &rsaquo;</button>
    </div>
@@ -954,9 +1024,9 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
     </div><input type="hidden" id="proDuration" value="60 seconds">
     <div class="lbl">What are you making?</div>
     <div class="opts" data-ctype-group style="display:grid;gap:8px">
-     <button type="button" class="opt" data-ctype="movie"><b>Animated movie</b><small>Characters act the story and speak their own lines</small></button>
-     <button type="button" class="opt on" data-ctype="narration"><b>Narration animation</b><small>A voice tells it and the characters act it out</small></button>
-     <button type="button" class="opt" data-ctype="presenter"><b>Documentary (presenter)</b><small>A host talks on stage, others act it out behind</small></button>
+     <button type="button" class="opt" data-ctype="movie"><b>Cinematic movie</b><small>Characters speak and act, filmed like a real film (close-ups, camera angles, film lighting)</small></button>
+     <button type="button" class="opt on" data-ctype="narration"><b>Narration animation</b><small>A voice tells the story and the characters act out every word, shot by shot</small></button>
+     <button type="button" class="opt" data-ctype="presenter"><b>Storyteller in the scene</b><small>A host in the corner explains while the people in the scene act it out</small></button>
     </div>
     <div class="lbl">Background</div>
     <div class="opts grid2 fmtopts" style="grid-template-columns:1fr 1fr">
@@ -992,8 +1062,8 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
     <textarea class="sendfallback" readonly rows="5" hidden aria-label="Your prompt. Copy everything in this box."></textarea>
     <ol class="nextsteps">
      <li><b>Tap a button.</b> We copy your prompt and open the AI.</li>
-     <li><b>Paste and send</b> in the AI, then wait for its reply.</li>
-     <li><b>Come back</b> and tap the button below to turn the reply into your video.</li>
+     <li><b>Paste and send</b> in the AI, then wait. If it stops before the end, just type <b>continue</b>.</li>
+     <li><b>Come back</b> with its zip or file, or copy its whole reply, and tap the button below.</li>
     </ol>
     <button type="button" class="p big" data-goto-import>I have the AI's reply &rsaquo;</button>
    </div>
@@ -1031,16 +1101,25 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
  <div id="importView" hidden>
   <div class="flow-top">
    <button type="button" class="ghost" id="importHomeBtn">‹ Back</button>
-   <div class="flow-meta"><b>Import TXT</b><span>Load scene file(s) &amp; sync your voiceover</span></div>
+   <div class="flow-meta"><b>Get your video</b><span>Last step: bring back what the AI wrote</span></div>
   </div>
   <div class="card" id="uploadCard" style="margin-top:0">
-   <h2>Upload your scene file(s) &amp; voiceover</h2>
-   <p class="wsub">Upload your scene <b>.txt</b> or <b>.js</b> file(s) (1 file, 3-batch, or legacy 12-batch files in any order — auto-organized), then upload your generated voiceover audio from ElevenLabs or Google AI Studio so spoken words, captions, and character acting lock together.</p>
-   <label class="up" id="upbox" for="file" role="button" tabindex="0"><b>1. Choose scene TXT file(s)</b><small>.txt, .js or one .zip of them · 1 file, a zip, or batch 1, batch 2, batch 3… + optional voiceover-script.txt · or drop here</small></label>
+   <h2>Bring back what the AI wrote</h2>
+   <p class="wsub"><b>Step 1:</b> add the AI's reply: its zip or file(s), or paste the whole reply in the box below. Long videos come in several parts: add them all, together or one at a time, in any order. We tell you if a part is missing. <b>Step 2 (optional):</b> add a voice recording so the characters speak. <b>Step 3:</b> tap Open in Player, then download your video.</p>
+   <label class="up" id="upbox" for="file" role="button" tabindex="0"><b>1. Add the AI's file(s)</b><small>Tap here and choose the .txt file(s) the AI gave you (or a .zip of them). You can add more later.</small></label>
    <input type="file" id="file" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" tabindex="-1" aria-hidden="true">
+   <details open style="margin:10px 0"><summary>Or paste the AI's whole reply here</summary><small class="muted" style="display:block;margin:4px 0 8px">No file from the AI? In the AI's chat, copy its WHOLE reply (every code block, all parts) and paste it below. Extra words around the code are fine: the app keeps only the code and puts the parts in order.</small><textarea id="paste" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste the AI's reply here (one part or all parts together)"></textarea><div class="row" style="margin-top:10px"><button class="p" id="lp">Make my video from this</button></div></details>
    <div class="ownnote" id="importOrderInfo" hidden></div>
+   <div class="partsbox" id="partsCheck" hidden>
+    <b id="pcHead"></b>
+    <div class="pc-chips" id="pcChips"></div>
+    <p id="pcText"></p>
+    <textarea id="pcMsg" readonly rows="6" aria-label="Message to send to your AI"></textarea>
+    <div class="row"><button type="button" class="p" id="pcCopy">Copy this message for your AI</button><button type="button" id="pcClear">Start again</button><button type="button" id="pcIgnore">This is my whole video</button></div>
+    <small class="muted" id="pcHow"></small>
+   </div>
    <div class="ownaudio" id="importAudioBox">
-    <div class="ownaudio-h"><b>2. Upload voiceover audio</b><span class="muted" id="importAudioBadge">1 file or any-order batch clips</span></div>
+    <div class="ownaudio-h"><b>2. Add a voice recording (optional)</b><span class="muted" id="importAudioBadge">1 file or several clips</span></div>
     <small class="muted" id="importAudioHint">Upload your full voiceover or multiple audio clips in any order. Moonshine AI transcribes every word, automatically puts out-of-order clips into script order, reconciles captions, and locks every character action to the voice.</small>
     <label class="up" id="importAudioDrop" for="importAudioFile" role="button" tabindex="0"><b>Choose voiceover audio clip(s)</b><small id="importAudioName">.mp3 · .wav · .m4a · .ogg · 1 full file or multiple clips in any order · or drop here</small></label>
     <input type="file" id="importAudioFile" multiple accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.webm" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" tabindex="-1" aria-hidden="true">
@@ -1061,7 +1140,7 @@ body.rec-mode #pstage>svg{width:100%!important;height:100%!important}
    </div>
    <div class="row import-actions" id="importLaunchRow" hidden><button type="button" class="p big" id="importOpenBtn">▶ Open in Player &amp; Sync</button></div>
    <div id="herr"></div>
-   <details><summary>Or paste scene code</summary><textarea id="paste" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste a single scene file or multiple labelled batches here"></textarea><div class="row" style="margin-top:10px"><button class="p" id="lp">Load pasted code</button></div></details>
+
   </div>
  </div>
 </div>
@@ -1611,9 +1690,10 @@ const TK={
    x:o.x??800,y:o.y??300,scale:o.scale??1,layer:o.layer||'back',par:o.par??0,screen:o.screen,show:[t0,t1??999],
    animate:t=>{const u=EZ((t-t0)/.4),e=t1?EZ((t1-t)/.3):1,m=Math.min(u,e);return{scale:(.8+.2*m)*(1+(o.pulse?o.pulse*S(t*3):0)),opacity:(o.flicker?.88+.12*S(t*23)*S(t*7):1)*m}}}},
  shake:(t,a=6,f=31)=>S(t*f)*a*(.6+.4*S(t*17.3)),
- icon:(n,a,b)=>(ICONS[n]||ICONS.question)(a,b),
+ /* the everyday-things library (public/noun-icons.js: bed, door, cup, school, bus...) fills in every name the app's own pictures do not have */
+ icon:(n,a,b)=>(ICONS[n]||(window.AnimatoNouns&&window.AnimatoNouns.NOUN_ICONS[n])||ICONS.question)(a,b),
  // item: an icon that pops onto the screen. o:{x,y,scale,t0,t1,layer,float,spin,rot,par,screen}
- item:(n,a,o={})=>{const t0=o.t0??0,t1=o.t1;return{svg:TK.icon(n,a,o.b),x:o.x??800,y:o.y??450,scale:o.scale??1,layer:o.layer||'back',par:o.par??0,screen:o.screen,show:[t0,t1??999],
+ item:(n,a,o={})=>{const t0=o.t0??0,t1=o.t1;return{_icon:n,follow:o.follow,fat:o.at,fdx:o.fdx,fdy:o.fdy,_hold:!!o.hold,svg:TK.icon(n,a,o.b),x:o.x??800,y:o.y??450,scale:o.scale??1,layer:o.layer||'back',par:o.par??0,screen:o.screen,show:[t0,t1??999],
   animate:t=>{const k=EZ((t-t0)/.35),ov=k<1?1+.18*S(PI*k):1,e=t1?EZ((t1-t)/.25):1,u=Math.min(k,e);return{scale:(.35+.65*u)*ov*(1+(o.pulse?o.pulse*S(t*5):0)),opacity:u,y:(o.float?S(t*1.6)*o.float:0)+(1-k)*30,rot:(o.rot||0)+(o.spin?t*o.spin:0)+(o.wobble?S(t*3)*o.wobble:0)}}}},
  // slide: any svg string travelling between two points. o:{x0,y0,x1,y1,t0,t1,s0,s1,r0,r1,fadeOut,layer,ease}
  slide:(svg,o={})=>{const t0=o.t0??0,t1=o.t1??t0+1,x0=o.x0??800,y0=o.y0??450,x1=o.x1??x0,y1=o.y1??y0;
@@ -1649,10 +1729,14 @@ const TK={
  bars:(v,o={})=>{const t0=o.t0??0,w=o.w??560,h=o.h??320,mx=Math.max(...v),n=v.length,bw=w/n*.64,cs=o.colors||['#6ab7ff','#3ddc84','#ffd76b','#ff8fb1','#b48cff'];return{screen:o.screen,layer:o.layer||'back',x:o.x??800,y:o.y??450,show:[t0,o.hide??999],par:o.par??0,
   svgFn:t=>{let s=`<rect x="${-w/2-30}" y="${-h/2-40}" width="${w+60}" height="${h+110}" rx="12" fill="#0d1328" stroke="#222" stroke-width="6" opacity=".92"/><path d="M${-w/2},${h/2} H${w/2}" stroke="#6a7288" stroke-width="3"/>`;
    v.forEach((x,i)=>{const k=EZ((t-t0-i*(o.gap??.35))/.6),bh=x/mx*h*k,cx=-w/2+w*(i+.5)/n;s+=`<rect x="${cx-bw/2}" y="${h/2-bh}" width="${bw}" height="${bh}" rx="4" fill="${cs[i%cs.length]}" stroke="#222" stroke-width="4"/>`+(o.labels?`<text x="${cx}" y="${h/2+34}" text-anchor="middle" font-size="22" font-weight="bold" fill="#e8e6e0" font-family="Arial">${esc(o.labels[i])}</text>`:'')+(k>.9&&o.values?`<text x="${cx}" y="${h/2-bh-10}" text-anchor="middle" font-size="24" font-weight="bold" fill="#fff" font-family="Arial">${esc(o.values[i])}</text>`:'')});return s}}},
- // bubble: speech or thought bubble. o:{x,y,t0,t1,kind:'say'|'think',size,flip}
- bubble:(text,o={})=>{const t0=o.t0??0,t1=o.t1??999,z=o.size??30,L=String(text).split('\n'),w=Math.max(...L.map(l=>l.length))*z*.56+50,h=L.length*(z+8)+34,th=o.kind==='think';
-  return{x:o.x??800,y:o.y??300,layer:'front',screen:o.screen,show:[t0,t1],svg:`<ellipse rx="${w/2}" ry="${h/2}" fill="#fff" stroke="#222" stroke-width="5"/>`+(th?`<circle cx="${-w/2+30}" cy="${h/2+22}" r="14" fill="#fff" stroke="#222" stroke-width="4"/><circle cx="${-w/2+14}" cy="${h/2+52}" r="8" fill="#fff" stroke="#222" stroke-width="4"/>`:`<path d="M${-w/6},${h/2-6} L${-w/3},${h/2+40} L${w/12},${h/2-6}Z" fill="#fff" stroke="#222" stroke-width="5" stroke-linejoin="round"/><path d="M${-w/6-4},${h/2-9} H${w/12+2}" stroke="#fff" stroke-width="8"/>`)+L.map((l,i)=>`<text y="${-(L.length-1)*(z+8)/2+i*(z+8)+z*.34}" text-anchor="middle" font-size="${z}" font-weight="bold" fill="#1b2130" font-family="${HAND}">${esc(l)}</text>`).join(''),
-  animate:t=>{const k=EZ((t-t0)/.25),e=t1<900?EZ((t1-t)/.2):1;return{scale:(.6+.4*k)*(o.flip?1:1),opacity:Math.min(k,e),y:S(t*2)*3}}}},
+ // bubble: NO speech or thought bubbles any more (they cover faces and look cheap). A file that still asks for one gets KINETIC TEXT:
+ // the words (or the key word of a long line) pop big at the top of the screen for a moment; a thought is italic. o:{t0,t1,kind}
+ bubble:(text,o={})=>{const raw=String(text||'').replace(/\s+/g,' ').trim(),E=window.AnimatoEngage,words=raw.split(' ').filter(Boolean);
+  const w=(words.length<=4?raw:(E&&E.keyWord?E.keyWord(raw):words.slice(0,3).join(' '))).toUpperCase().slice(0,26);if(!w)return{x:800,y:170,show:[0,0],svg:''};
+  const t0=o.t0??0,t1=Math.min(o.t1??999,t0+2.2),th=o.kind==='think',sz=Math.max(58,Math.min(96,1100/Math.max(5,w.length)));
+  return{screen:true,layer:'front',x:800,y:FMT&&FMT.k==='9:16'?250:170,show:[t0,t1],_kinetic:1,
+   svg:`<text text-anchor="middle" y="${Math.round(sz*.34)}" font-size="${Math.round(sz)}" font-weight="900"${th?' font-style="italic"':''} fill="${th?'#e8f1ff':'#ffffff'}" stroke="#0b0d12" stroke-width="${Math.round(sz/7)}" paint-order="stroke" stroke-linejoin="round" font-family="Arial Black,Impact,Arial,sans-serif">${esc(w)}</text>`,
+   animate:t=>{const k=EZ((t-t0)/.22),ov=k<1?1+.22*S(PI*k):1,e=EZ((t1-t)/.22);return{scale:(.55+.45*k)*ov,opacity:Math.min(k,e),y:th?S(t*2)*3:0}}}},
  // puffs: smoke puffs. o:{x,y,n,t0,t1,color,size, pos:(ts)=>[x,y]}
  puffs:(o={})=>{const n=o.n??14,t0=o.t0??0,t1=o.t1??t0+3,r=rng(o.seed||8);return Array.from({length:n},(_,i)=>{const ts=t0+(t1-t0)*i/n,p=o.pos?o.pos(ts):[o.x??800,o.y??700],jx=(r()-.5)*50;
   return{svg:`<circle r="${o.size??30}" fill="${o.color||'#e8e6e0'}"/>`,x:p[0]+jx,y:p[1],layer:o.layer||'back',show:[ts,ts+2.2],animate:t=>{const a=t-ts;return{scale:.4+a*1.4,opacity:Math.max(0,.75-a*.36),y:a*40,x:jx*a*.6}}}})},
@@ -2208,7 +2292,8 @@ Captions: {from, to, text, pos}. pos is omitted for the normal bottom subtitle, 
 Rules: output valid JavaScript only, straight quotes, every scene needs a duration, never use external files or network calls.
 
 CINEMATIC TOOLKIT v2 (all of these are available as plain functions; use them heavily, they are what makes the film feel professional):
-ICONS (labelled picture props): icon(name, text) returns an svg string drawn around (0,0). Names: coin, bill, stack, bag(label), box(label), well(label), rocket(label), flame, chartUp, chartDown, bulb, gear, laptop(label), house, trophy, crown, phone(label), newspaper(headline), chip(label), globe, lock, star, heart, fire, storm, factory, tower(label), car, flag(label), question, check, cross, clock, folder(label), sign(label), person(colour).
+ICONS (labelled picture props): icon(name, text) returns an svg string drawn around (0,0). Names: coin, bill, stack, bag(label), box(label), well(label), rocket(label), flame, chartUp, chartDown, bulb, gear, laptop(label), house, trophy, crown, phone(label), newspaper(headline), chip(label), globe, lock, star, heart, fire, storm, factory, tower(label), car, flag(label), question, check, cross, clock, folder(label), sign(label), person(colour). EVERYDAY THINGS (same icon()/item() call): ${((window.AnimatoNouns&&window.AnimatoNouns.NOUN_NAMES)||[]).join(', ')}.
+SHOW WHAT IS SAID (most important rule for viewers watching on mute): every concrete thing the narrator names (a bed, a clock, a door, a bus, a cup, a phone...) must be SEEN on screen at the moment its word is said, (in a beat: ['item','bed',null,1250,520,1,'@"bed"']; in a scene: item('bed',null,{x:1250,y:520,t0:<second the word is said>})) or as a real part of the set. One picture at a time, near the person who uses it, never covering a face. A thing a person holds (wallet, cup, phone, letter, money, key, book) goes IN their hands: item('wallet',null,{follow:'<their id>',at:'chest',fdy:70,layer:'front',scale:.42,t0:..}) and the person acts 'present' (both hands up showing it). STORY LOOK (the short-story style that keeps people watching): the person is small in a big, detailed world in wide shots and fills the frame in close-ups; the camera flies in from wide on new moments; the time of day tells the story (write 'that night', 'the next morning', and use night or warm morning sets); every few seconds something new happens on screen (a sign goes up, a thing is built, someone arrives). If the app has no picture for it, build it from shapes.
 item(name, text, {x, y, scale, t0, t1, layer, float, spin, rot, wobble, pulse, par, screen}) a ready prop that POPS in at t0 (with a bounce) and pops out at t1. Example: item('well','NVIDIA',{x:1150,y:640,t0:.5}), item('bulb',null,{x:600,y:260,t0:2,t1:3.5,float:8}).
 flyTo(svg, {t0, t1, x0, y0, x1, y1, arc, spin, shrink, scale}) one object thrown in an arc and swallowed at the end. flyMany(svg, n, {t0, gap, dur, x0, y0, x1, y1, jx, jy, arc, scale}) a stream of them: write ...flyMany(icon('bill'), 8, {x0:600, y0:620, x1:1150, y1:650, t0:2, gap:.35, scale:.5}) in props. Use it for money into a box, a well or a machine, letters into a mailbox, coins into a jar.
 slide(svg, {t0, t1, x0, y0, x1, y1, s0, s1, r0, r1, arc, spin, fadeOut, layer}) moves any svg between two points.
@@ -2346,12 +2431,13 @@ const withBg=t=>withCT((()=>{const mb=myBgBlock();if(mb&&MB())return MB().inject
 /* Every prompt ends with the same delivery rule, so ANY AI (ChatGPT, Claude, Gemini...) hands the script over as a downloadable .txt file with a short how-to, never as a long block to copy. */
 const FILE_DELIVERY_MARK='=== HOW TO DELIVER YOUR ANSWER (IMPORTANT) ===';
 function withFileDelivery(p){p=String(p||'');if(p.includes(FILE_DELIVERY_MARK))return p;
- return p+`\n\n${FILE_DELIVERY_MARK}
-- Do NOT write the scene script (or any long code) in the chat for me to copy. Put it in real, downloadable files instead. Use your file tool (file creation, code interpreter, canvas or artifact download). The files contain ONLY the script: no explanation, no markdown fences.
-- SHORT FILM (the whole film fits in one file): one file named \`scene-file.txt\`.
-- LONG FILM (several batches): if you CAN create a zip file, write ALL the batch files yourself without waiting for me to say NEXT (ignore any "pause for NEXT" instruction) and deliver ONE zip named \`scene-files.zip\` that contains only the TXT files: \`scene-file-1.txt\`, \`scene-file-2.txt\`, and so on, in order. If you CANNOT create a zip, deliver every batch yourself, one after the other, with NO waiting for me to say NEXT: either as separate downloadable files (\`scene-file-1.txt\`, \`scene-file-2.txt\`, and so on), or, if you cannot make files, each batch in its own code block (under about 28 KB each, a one-line label above each, nothing leaking out of its block), all in the same reply. If your own length limit cuts the reply, I will say "continue": carry on with the next batch.
-- Your chat reply must be short (6 lines for the steps): give the download link(s), then these steps: 1) Download the file(s) (the zip, or every batch). 2) Open Animato Studio Pro, go to Tools, then Code to stickman. 3) Tap "Choose scene TXT file(s)" and pick the zip, or all the batch files together (or one at a time: the app puts them in order). 4) Add the voiceover audio if you have it, then press Play. If a PUBLISH KIT is asked for in the PRODUCTION TEAM section, add it after these steps (10 short lines at most).
-- Only if you truly cannot create a downloadable file, say so in one line, and then print the script right away batch by batch, each batch in its own code block, as described above.`}
+ /* Guided prompts carry their own single delivery rule (zip if the AI can make files, otherwise one code block per part without stopping). A second, different rule here made weaker models stop and ask. */
+ if(p.startsWith('ANIMATO GUIDED MODE'))return p;
+ return p+`\n\n${FILE_DELIVERY_MARK} (this replaces every other delivery rule in this message)
+- Start with the code at once. No questions, no plan in the chat, no "shall I continue?".
+- IF YOU CAN CREATE FILES (code interpreter, file creation, canvas or artifact download): SHORT FILM = one file \`scene-file.txt\`. LONG FILM = every batch as its own file (\`scene-file-1.txt\`, \`scene-file-2.txt\`, ...) inside ONE zip named \`scene-files.zip\`. Write ALL batches yourself without waiting for me to say NEXT. The files contain only the script: no explanation, no markdown fences.
+- IF YOU CANNOT CREATE FILES: print every batch in its own code block, one after the other, all in this reply (under about 28 KB each, a one-line label above each, nothing outside the blocks). Never stop between batches and never wait for NEXT. If your own length limit cuts you off, stop at the end of a complete scene; when I say "continue", go on with the very next scene in a new block that starts with the same batch line.
+- Your chat reply around the files is at most 6 short lines: the download link(s), then: 1) Download the file(s). 2) Open Animato Studio Pro, Tools, Code to stickman. 3) Tap "Add the AI's file(s)" and pick the zip or all the files. 4) Add the voiceover audio if you have it, then press Play. If a PUBLISH KIT is asked for in the PRODUCTION TEAM section, add it after these steps (10 short lines at most).`}
 function withTeam(p,pro){const T=window.AnimatoTeam;if(!T)return p;try{const dna=ensureDna(false);return T.withProductionTeam(p,{style:SELECTED_CHARACTER==='builder'?'custom':SELECTED_CHARACTER,seed:deviceSalt()+'|'+(dna&&dna.seed||''),short:guidedOn(),aspect:PROJ_AR,bgMode:BG_MODE,script:!!pro&&!!($('#proScript')?.value||'').trim()})}catch(e){return p}}
 function buildCompletedPrompt(){syncTierUI();return withFileDelivery(withSize(withTeam(guidedOn()?buildGuidedWizPrompt():withPackOverride(withBg(fmtAdapt(buildCompletedPromptRaw()))))))}
 function buildCompletedPromptRaw(){const f=wizVals(),stick=SELECTED_CHARACTER==='stickman',custom=SELECTED_CHARACTER==='custom',builder=SELECTED_CHARACTER==='builder';
@@ -2500,6 +2586,7 @@ function charPreview(style){
  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-250 150 500 760"><defs><linearGradient id="${hgId}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(hc,1.07)}"/><stop offset="1" stop-color="${shade(hc,.93)}"/></linearGradient></defs>${g}</svg>`}
 const WSTEPS=['Pick your star','Your idea','Choose the look','Send to your AI'];
 let WS=0;
+function partsNoteHtml(sec){const P=window.AnimatoParts;if(!P)return'';const e=P.explainParts(sec);if(!e.long)return'';return'<b>'+esc(e.title)+'</b><small>'+e.lines.map(l=>esc(l)).join('</small><small>')+'</small>'}
 function durMinutes(s){const str=String(s||'60 seconds').toLowerCase(),n=parseFloat(str)||0;return /sec/.test(str)?n/60:(n||1)}
 function setHomeView(v){
  HOME_VIEW=(v==='wizard'||v==='pro'||v==='import')?v:'landing';
@@ -2599,12 +2686,11 @@ function updateStep7UI(){
  const sb=$('#wizShortBox'),bn=$('#wizBatchNote'),sub=$('#step7Sub'),st=$('#formStatus'),hd=$('#step7Heading');
  if(sb)sb.hidden=false;
  if(hd)hd.textContent='Send it to your AI';
- if(plan.isBatched){
-  if(sub)sub.textContent=`Long video (${durAdj}). Your AI will answer in ${plan.totalBatches} parts. Tap a button and we do the copying for you.`;
-  if(bn){
-   bn.hidden=false;
-   bn.innerHTML=`<b>Long video: your AI will answer in several parts.</b><small>Keep going until it says it is finished, then bring all the parts back here.</small>`;
-  }
+ const pn_=partsNoteHtml(durMinutes(dur)*60);
+ if(pn_){
+  const e_=window.AnimatoParts.explainParts(durMinutes(dur)*60);
+  if(sub)sub.textContent=`Long video (${durAdj}): your AI will write ${e_.parts} parts in one go. Tap a button and we do the copying for you.`;
+  if(bn){bn.hidden=false;bn.innerHTML=pn_}
   if(st)st.textContent=`Save it as a file or copy it yourself.`;
  }else{
   if(bn){bn.hidden=true;bn.innerHTML=''}
@@ -2622,12 +2708,11 @@ function updateProStep2UI(){
  const copyPlan=Gen&&Gen.getVoiceoverCopyBatchPlan?Gen.getVoiceoverCopyBatchPlan(dur,scTxt):{singleBatch:true,batchCount:1};
  const voBatchNote=copyPlan.singleBatch?'1 mobile-safe voiceover block':`${copyPlan.batchCount} mobile-safe voiceover batches`;
  const bn=$('#proBatchNote'),desc=$('#proPromptDesc'),pre=$('#proPromptPreview');
- if(plan.isBatched){
-  if(bn){
-   bn.hidden=false;
-   bn.innerHTML=`<b>Long video: your AI will answer in several parts.</b><small>Keep going until it says it is finished, then bring all the parts back here.</small>`;
-  }
-  if(desc)desc.textContent=`Tap a button and we copy the prompt and open the AI for you. Long video: the AI answers in ${plan.totalBatches} parts.`;
+ const pn2_=partsNoteHtml(durMinutes(dur)*60);
+ if(pn2_){
+  const e2_=window.AnimatoParts.explainParts(durMinutes(dur)*60);
+  if(bn){bn.hidden=false;bn.innerHTML=pn2_}
+  if(desc)desc.textContent=`Tap a button and we copy the prompt and open the AI for you. Long video: the AI writes ${e2_.parts} parts in one reply.`;
  }else{
   if(bn){bn.hidden=true;bn.innerHTML=''}
   if(desc)desc.textContent=`Tap a button and we copy the prompt and open the AI for you.`;
@@ -3110,7 +3195,7 @@ async function guidedGenerate({Gen,GD,callActive,setSt,signal,mode,targetSec,tit
  const abortCheck=()=>{if(signal&&signal.aborted)throw new DOMException('Cancelled','AbortError')};
  const fmtS=x=>Math.round(x)+'s';
  let code='',parsed=null,prevCount=0,prevSec=0,castText='';
- const story=(SC)=>{const old=SC.slice(0,-30).map(x=>x.name).filter(Boolean).join(' > ');const rec=SC.slice(-30).map((x,i)=>(SC.length-Math.min(30,SC.length)+i+1)+'. '+(x.name||'')+': '+String(x.narration||x.captions.map(c=>c.text).join(' ')||'').slice(0,160)).join('\n');return(old?'Earlier beats: '+old+'\n':'')+rec};
+ const story=(SC)=>{const old=SC.slice(0,-30).map(x=>x.name).filter(Boolean).join(' > ');const rec=SC.slice(-30).map((x,i)=>(SC.length-Math.min(30,SC.length)+i+1)+'. '+(x.name||'')+': '+String(x.narration||x.captions.map(c=>c.text).join(' ')||'').slice(0,160)).join('\n');const locs=[...new Set(SC.map(x=>x.bgName||x.set||x.s||x.location||'').filter(Boolean))].slice(-14).join(', ');const last=SC.length?SC[SC.length-1]:null;return(old?'Earlier beats: '+old+'\n':'')+rec+(locs?'\nLOCATIONS ALREADY USED (open this part in a NEW one): '+locs:'')+(last?'\nTHE LAST BEAT ENDED ON (open right after it, with a fresh hook): '+String(last.narration||(last.captions||[]).map(c=>c.text).join(' ')||'').slice(0,200):'')};
  const ask=async(prompt,label)=>{abortCheck();setSt(label);const out=await callActive({systemInstruction:GD.buildGuidedSystemInstruction({style:brief.style,lookOptions:brief.lookOptions,aspect:PROJ_AR}),prompt,images:[],responseFormat:'json',signal,onStatus:setSt});return cleanSceneCodeStr(out&&out.sceneCode)};
  for(let k=1;k<=n;k++){
   const part=plan.parts[k-1];
@@ -3615,9 +3700,21 @@ function guardLoaded(r){
   /* every person's body acts the story: verbs in the narration the file never acted out become real actions (wind-up, strike, settle) */
   try{if(window.AnimatoGaze)window.AnimatoGaze.directGaze(r.SC)}catch(e){}
   try{if(window.AnimatoActing){const ad=window.AnimatoActing.directActing(r.SC);if(ad.added)(r.repairs=r.repairs||[]).push('Added '+ad.added+' body action'+(ad.added>1?'s':'')+' the narration called for but the file never acted out.')}}catch(e){}
+  /* HOLD IT UP: a thing the narrator names that a person can hold (the wallet, the cup, the letter) sits in the main person's hands, so they
+     lift both hands to show it for as long as it is on screen, unless the file has them doing something else then */
+  try{(r.SC||[]).forEach(sc=>{(sc.props||[]).forEach(p=>{if(!p||!p._hold||!p.follow||!Array.isArray(p.show))return;const ch=sc.characters||[];
+   const c=ch.find(q=>q&&q._who===p.follow)||(/^#\d+$/.test(p.follow)?ch[+p.follow.slice(1)]:null);if(!c)return;
+   const t0=p.show[0],t1=Math.min(+sc.duration||5,p.show[1]);if(Array.isArray(c._busy)&&c._busy.some(([x,y])=>t0<y&&t1>x))return;
+   (c._autoAct=c._autoAct||[]).push({t0,t1:Math.max(t0+.5,t1-.25),kind:'present',verb:'holds'})})})}catch(e){}
   /* THE DIRECTOR: people arrive when the narration says they come, and a static camera becomes shots that follow what each phrase is about (feet, face, hands, the hit, the scream) */
-  try{if(window.AnimatoDirector){const dd=window.AnimatoDirector.directScenes(r.SC,{probe});const bits=[];if(dd.moves)bits.push(dd.moves+' entrance'+(dd.moves>1?'s':''));if(dd.cameras)bits.push(dd.shots+' camera shots in '+dd.cameras+' scene'+(dd.cameras>1?'s':''));if(bits.length)(r.repairs=r.repairs||[]).push('The director added '+bits.join(' and ')+' so the picture follows the narration.')}}catch(e){console.warn('director failed',e)}
-  try{if(window.AnimatoFace){const fd=window.AnimatoFace.directFaces(r.SC);if(fd.dropped)(r.repairs=r.repairs||[]).push(fd.dropped+' face direction'+(fd.dropped>1?'s':'')+' used a feeling the app does not know and was ignored.')}}catch(e){}
+  try{if(window.AnimatoDirector){/* vertical films restage people (rows, spacing, size), so named shots there aim at where each person was really DRAWN in the last frame */
+  const livePos=r.ar==='9:16'?((sc,name,T)=>{const P=FRAME_POS[name];if(!P||P.sc!==sc||Math.abs((P.T||0)-T)>.3)return null;const nh={human:596,doodle:657,stickman:648,original:722,custom:700}[P.st]||640;return{x:P.x,y:P.y,s:P.s*nh/598}}):null;
+  const dd=window.AnimatoDirector.directScenes(r.SC,{probe,style:r.style||SELECTED_CHARACTER,livePos});const bits=[];if(dd.moves)bits.push(dd.moves+' entrance'+(dd.moves>1?'s':''));if(dd.cameras)bits.push(dd.shots+' camera shots in '+dd.cameras+' scene'+(dd.cameras>1?'s':''));if(bits.length)(r.repairs=r.repairs||[]).push('The director added '+bits.join(' and ')+' so the picture follows the narration.')}}catch(e){console.warn('director failed',e)}
+  /* THE ENGAGEMENT CURVE (public/engage.js): hook on the first second, nothing quiet for long (punch-ins on spoken words, key words on screen),
+     re-hooks near 15 / 30 / 60 s, close-ups that lift the people off the set. Measured before and after, shown under the player. */
+  try{for(const sc of r.SC){if(!sc)continue;if(typeof sc.background==='string'&&sc.background.indexOf('<')>=0)sc.background=lineArt(sc.background);for(const pr of sc.props||[])if(pr&&typeof pr.svg==='string'&&!pr._engage){pr.svg=lineArt(pr.svg);delete pr._s}}}catch(e){}
+  try{if(window.AnimatoEngage&&!/engage\s*:\s*false/.test(String(r.sourceCode||'').slice(0,4000))){const eg=window.AnimatoEngage.engageFilm(r.SC,{ar:r.ar});r.engage=eg;if(eg.notes.length)(r.repairs=r.repairs||[]).push(...eg.notes)}}catch(e){console.warn('engagement pass failed',e)}
+  try{if(window.AnimatoFace){const fd=window.AnimatoFace.directFaces(r.SC);if(fd.corrected)(r.repairs=r.repairs||[]).push(fd.corrected+' face'+(fd.corrected>1?'s':'')+' did not fit what was happening (a smile in a fire, a happy face while being chased). Changed to fit the moment.');if(fd.dropped)(r.repairs=r.repairs||[]).push(fd.dropped+' face direction'+(fd.dropped>1?'s':'')+' used a feeling the app does not know and was ignored.')}}catch(e){}
   /* STORYBOARD CHECK: the film must match the plan the AI wrote first. Anything the plan said to build that was never drawn, and scenes with no plan, are listed for the person. */
   try{if(Array.isArray(r.board)&&r.board.length){
    /* every way of drawing counts: SVGS.*, SETS.*, helper functions (svgFn), and the app's own items. See character-guard.js findUndrawn. */
@@ -3668,9 +3765,9 @@ function loadScenesRaw(code){
  const baseEnv=Object.assign(Object.create(null),ENV,{
   BGP,SETS,CAST,SVGS,_charStyle:pickedStyle(),_customNames:Object.create(null),
   realSceneTag:(BG_MODE==='realistic'&&window.AnimatoBg&&window.AnimatoBg.realisticSceneTag)?((k,m)=>window.AnimatoBg.realisticSceneTag(k,m)):null,
-  defSet:(k,v)=>{SETS[k]=v;if(liveEnv&&liveEnv.SETS)liveEnv.SETS[k]=v},
+  defSet:(k,v)=>{v=lineArt(v);SETS[k]=v;if(liveEnv&&liveEnv.SETS)liveEnv.SETS[k]=v},
   defCast:(k,v)=>{CAST[k]=v;if(liveEnv&&liveEnv.CAST)liveEnv.CAST[k]=v},
-  defSvg:(k,v)=>{SVGS[k]=v;if(liveEnv&&liveEnv.SVGS)liveEnv.SVGS[k]=v},
+  defSvg:(k,v)=>{v=lineArt(v);SVGS[k]=v;if(liveEnv&&liveEnv.SVGS)liveEnv.SVGS[k]=v},
   beat:beatFn,
   /* the AI's storyboard, written BEFORE any scene: one entry per scene ({say, see, do, build, set, cam, text}). The app checks the film against it. */
   storyboard:(list)=>{board=(board||[]).concat((Array.isArray(list)?list:(list&&Array.isArray(list.scenes)?list.scenes:[])).filter(x=>x&&typeof x==='object')).slice(0,400)},
@@ -3704,7 +3801,8 @@ function loadScenesRaw(code){
  SC.forEach((s,i)=>{s.name=s.name||'Scene '+(i+1);s.duration=Math.max(.5,+s.duration||5);s.narration=typeof s.narration==='string'?s.narration:(typeof s.say==='string'?s.say:'');s.characters=(Array.isArray(s.characters)?s.characters:(s.character?[s.character]:[])).filter(c=>c&&typeof c==='object');s.captions=(Array.isArray(s.captions)?s.captions:[]).filter(c=>c&&typeof c==='object'&&c.text!=null);s.props=Array.isArray(s.props)?s.props:[]});
  const syncMod=window.AnimatoSync;
  if(syncMod&&typeof syncMod.stripVoiceoverHeaders==='function'&&narration.trim())narration=syncMod.stripVoiceoverHeaders(narration);
- if(!narration.trim())narration=SC.map(s=>s.narration||s.captions.map(c=>c.text).join(' ')).filter(Boolean).join(' ');
+ /* guided files carry no voiceover(): the narration is the say lines, and the person brings their own recording of it */
+ if(!narration.trim()){narration=SC.map(s=>s.narration||s.captions.map(c=>c.text).join(' ')).filter(Boolean).join(' ');if(narration.trim())ownAudio=true}
  else ownAudio=true;
  if(syncMod&&typeof syncMod.alignNarrationToScenes==='function'&&typeof syncMod.reconcileSceneCaptionsWithNarration==='function'&&narration.trim()){
   const aligned=syncMod.alignNarrationToScenes(narration,SC);
@@ -3712,13 +3810,34 @@ function loadScenesRaw(code){
   rec.forEach((rc,i)=>{if(rc&&SC[i]){if(!SC[i].narration&&aligned[i])SC[i].narration=aligned[i];SC[i].captions=rc.captions}});
  }
  if(TH){TH.duration=10;TH.characters=(Array.isArray(TH.characters)?TH.characters:(TH.character?[TH.character]:[])).filter(c=>c&&typeof c==='object');TH.captions=[];TH.props=Array.isArray(TH.props)?TH.props:[];TH.name='Thumbnail';TH.cut=true;TH.fade=.05;TH.ar='16:9'}
+ /* SHOW WHAT IS SAID (public/scenery.js): a scene written as scene({...}) also gets a picture of every thing its narration names that it does not
+    already show (a bed, a clock, a bus...), one at a time, at the moment the word is said. Beats already got theirs when they were expanded. */
+ try{const mk=baseEnv.item||ENV.item;const Scenery=window.AnimatoScenery;if(mk&&Scenery&&Scenery.autoProps)SC.forEach(s=>{if(!s||s._autoScenery||s.auto===false)return;const tx=String(s.narration||(s.captions||[]).map(c=>c.text).join(' ')).trim();if(!tx)return;
+  Scenery.autoProps(tx,s.duration,s.props,s.characters).filter(t=>t[0]==='item').forEach(t=>{const[,n,l,x,y,k,t0,t1,ex]=t;try{const it=mk(n,l,Object.assign({x,y,scale:k,t0,t1},ex||{}));if(it){it._auto=n;s.props.push(it)}}catch(e){}});s._autoScenery=true})}catch(e){console.warn('scenery failed',e)}
+ /* THE STORY'S CLOCK, SEEN: "that night" turns the picture deep blue, "the next morning" warm gold (unless the scene chose its own colour) */
+ try{const Scn=window.AnimatoScenery;if(Scn&&Scn.daytimeTint)SC.forEach(s=>{const d=Scn.daytimeTint(s.narration||(s.captions||[]).map(c=>c.text).join(' '),s);if(d){s.tint=d.tint;s._daytime=d.name}})}catch(e){}
+ /* CAST IDENTITY (public/cast-identity.js): the same person is the same person in every scene; only clothes change */
+ let castFix=[];try{if(window.AnimatoCast)castFix=window.AnimatoCast.lockCast(TH?SC.concat([TH]):SC,{narration})}catch(e){console.warn('cast identity failed',e)}
  /* SAVED CHARACTER SAFETY NET: when the person's own character is selected, anyone the file names without drawing them (or leaves unnamed) is built from the saved pack instead of falling back to the default figure */
  try{if(bindPackCast(SC,TH,customs))style='custom'}catch(e){console.warn('pack binding failed',e)}
  try{fixMyBgGround(SC,TH,ar)}catch(e){console.warn('background placement failed',e)}
  if(!style&&Object.keys(customs).length&&SC.some(s=>s.characters.some(c=>c&&c.custom!=null)))style='custom';
  const sourceCode=(res&&typeof res.repairedCode==='string')?res.repairedCode:String(code||'');
- return{SC,title,castKey,board,svgKeys:Object.keys(SVGS),setKeys:Object.keys(SETS),castKeys:Object.keys(CAST),narration,voice,ownAudio,ar:arOf(code),TH,style,customs,repairs:res.repairs||[],execEnv:res.execEnv||baseEnv,sourceCode}}
-function cleanLook(l){const o={...ORIG,...(l||{})};for(const k in OPT)if(!OPT[k].includes(o[k]))o[k]=ORIG[k];
+ return{SC,title,castKey,board,svgKeys:Object.keys(SVGS),setKeys:Object.keys(SETS),castKeys:Object.keys(CAST),narration,voice,ownAudio,ar:arOf(code),TH,style,customs,repairs:(res.repairs||[]).concat(castFix),execEnv:res.execEnv||baseEnv,sourceCode}}
+/* A cast look the file left half empty used to inherit the lab's original man (grey hair, glasses, angry brows, 70 years old), so every
+   unspecified person in a film looked like the same old man. Missing fields are now filled with a natural, varied, friendly default
+   picked from the fields that ARE written (same look in, same person out, so every scene and the export match). */
+const LOOK_FILL=new WeakMap();
+function lookFill(l){if(!l||typeof l!=='object')return{};let f=LOOK_FILL.get(l);if(f)return f;
+ let h=2166136261;const key=JSON.stringify(l);for(let i=0;i<key.length;i++){h^=key.charCodeAt(i);h=Math.imul(h,16777619)}
+ const r=n=>{h^=h<<13;h^=h>>>17;h^=h<<5;return((h>>>0)%1000)/1000*n};const pk=a=>a[Math.floor(r(a.length))%a.length];
+ const fem=String(l.gender||'').toLowerCase()==='female';
+ f={hairc:pk(['#1f1410','#2b1b12','#3a2416','#4a2e1c','#5c3a21','#16120f','#6b4423','#2a201a']),glasses:r(1)<.16?pk(['round','rect']):'none',age:Math.round((.12+r(.3))*100)/100,
+  brow:'calm',mouth:pk(['smile','smile','flat','smirk']),skin:pk(['#f2c28f','#e0a878','#c68b5c','#a86f45','#8d5a3b','#6e4429']),
+  outfitc:pk(['#2b59c3','#c0392b','#2e8b57','#8e44ad','#d35400','#34495e','#16a085','#b7950b','#7f4f24','#1f3a5f']),hair:fem?pk(['swept','pompadour','swept']):pk(['crop','swept','pompadour','crop']),
+  outfit:fem?pk(['dress','tee','hoodie','coat','turtle']):pk(['tee','hoodie','zip','crew','coat','suit'])};
+ LOOK_FILL.set(l,f);return f}
+function cleanLook(l){const o={...ORIG,...((l&&l!==ORIG&&Object.keys(l).length<Object.keys(ORIG).length)?lookFill(l):{}),...(l||{})};for(const k in OPT)if(!OPT[k].includes(o[k]))o[k]=ORIG[k];
  if(!['male','female'].includes(o.gender))o.gender='male';
  for(const k of['skin','hairc','outfitc']){let v=String(o[k]||'').trim();if(/^#[0-9a-f]{3}$/i.test(v))v='#'+v[1]+v[1]+v[2]+v[2]+v[3]+v[3];o[k]=/^#[0-9a-f]{6}$/i.test(v)?v:ORIG[k]}
  o.age=Math.min(1,Math.max(0,+o.age||0));o.k=Math.min(1.1,Math.max(.85,+o.k||1));o.bw=Math.min(1.15,Math.max(.85,+o.bw||1));return o}
@@ -3742,15 +3861,21 @@ const cleanSvg=x=>String(x||'').replace(/<\s*(script|foreignObject|image|iframe)
 let CUSTOMS={};
 const CP_KEYS=['headBehind','headBehindSide','head','torso','upperArm','foreArm','upperLeg','lowerLeg','headSide','torsoSide','lowerLegSide','headBack','torsoBack','mouthOpen','mouthOpenSide','eyesClosed','eyesClosedSide'];
 const CP_RIG={upperLeg:150,lowerLeg:150,torso:190,shoulderX:58,shoulderDown:25,hipX:32,upperArm:105,foreArm:100};
+/* LINE ART POLISH: every outline the AI draws (uploaded characters, its own sets and objects) gets round joins and round ends, so corners and
+   line ends look hand-inked instead of jagged mitres and square stubs. Only shapes that do not set their own joins are touched. */
+const LA_RE=/<(path|polyline|polygon|line|rect|ellipse|circle)\b(?![^>]*stroke-linejoin)/g;
+function lineArt(x){return typeof x==='string'&&x.length<600000&&x.indexOf('stroke')>=0?x.replace(LA_RE,'<$1 stroke-linejoin="round" stroke-linecap="round"'):x}
 function cpClean(svg,pre){if(typeof svg!=='string'||!svg.trim())return '';
- let x=cleanSvg(svg.slice(0,40000)).replace(/<\s*style[\s\S]*?(<\/\s*style\s*>|$)/gi,'').replace(/<\s*(use|animate\w*|set|a)\b[^>]*>/gi,'').replace(/url\(\s*(?!#)[^)]*\)/gi,'none');
- x=x.replace(/<\/\s*(use|animate\w*|set|a)\s*>/gi,'');
- return x.replace(/\bid="([^"]+)"/g,'id="'+pre+'$1"').replace(/url\(\s*#([^)\s]+)\s*\)/g,'url(#'+pre+'$1)')}
+ /* links to a shape in the same piece (a gradient borrowing another gradient's colours: href="#base") are kept; every other link is switched off by cleanSvg */
+ let x=svg.slice(0,40000).replace(/(\s)(?:xlink:)?href(\s*=\s*["'])#/gi,'$1KEEPHREF$2#').replace(/url\(\s*(?:&quot;|["'])?\s*#([^)"'&\s]+)\s*(?:&quot;|["'])?\s*\)/gi,'url(#$1)');
+ x=cleanSvg(x).replace(/KEEPHREF/g,'href').replace(/<\s*style[\s\S]*?(<\/\s*style\s*>|$)/gi,'').replace(/<\s*(use|animate\w*|set|a)\b[^>]*>/gi,'').replace(/url\(\s*(?!#)[^)]*\)/gi,'none');
+ x=lineArt(x.replace(/<\/\s*(use|animate\w*|set|a)\s*>/gi,''));
+ return x.replace(/\bid="([^"]+)"/g,'id="'+pre+'$1"').replace(/\bhref="#([^"]+)"/g,'href="#'+pre+'$1"').replace(/url\(\s*#([^)\s]+)\s*\)/g,'url(#'+pre+'$1)')}
 function regCustom(name,def,store){name=String(name==null?'Custom':name).trim().slice(0,40)||'Custom';if(!def||typeof def!=='object')def={};
  const src=(def.parts&&typeof def.parts==='object')?Object.assign({},def,def.parts):def,pre='cp'+(Object.keys(store).length+1)+'_',hx=/^#[0-9a-f]{3,8}$/i;
  const R={...CP_RIG};if(def.rig&&typeof def.rig==='object')for(const k in CP_RIG){const v=+def.rig[k];if(isFinite(v)&&v>=5&&v<=600)R[k]=v}
  const col=hx.test(def.color)?def.color:'#8a8f98',out=hx.test(def.outline)?def.outline:'#1a1a1a',skin=hx.test(def.skin)?def.skin:'#f2c28f',P={};
- for(const k of CP_KEYS)P[k]=cpClean(src[k],pre);
+ for(const k of CP_KEYS)P[k]=cpClean(src[k],pre+k+'_');
  const own=!!P.head;
  let FACE=null;{const fd=def.face;if(fd&&typeof fd==='object'){const mm=o=>{const r={};if(o&&typeof o==='object')for(const k of Object.keys(o).slice(0,24)){const v=cpClean(o[k],pre+'m'+k+'_');if(v)r[k]=v}return r},pp=v=>Array.isArray(v)&&isFinite(+v[0])&&isFinite(+v[1])?[+v[0],+v[1]]:null,ey=fd.eyes||{},br=fd.brows||{};
   FACE={pupil:cpClean(fd.pupil,pre+'pu_'),pupilSide:cpClean(fd.pupilSide,pre+'ps_'),browL:cpClean(fd.browL,pre+'bl_'),browR:cpClean(fd.browR,pre+'br_'),browSide:cpClean(fd.browSide,pre+'bs_'),mouths:mm(fd.mouths),mouthsSide:mm(fd.mouthsSide),
@@ -3770,10 +3895,15 @@ function puppet(C,Pz,talk,mo,blk,view,uid){const R=C.rig,side=view==='side',back
   if(side){th=-CL(sw,-110,110);if(kb>1){kn=Math.min(150,kb);const t=Math.max(0,sw)*Math.PI/180,kk=kn*Math.PI/180;ext=Math.max(ext,R.upperLeg*Math.cos(t)+R.lowerLeg*Math.cos(t-kk))}}
   else{th=-m*CL(sw*(kb>1?.15:.4),-30,30);if(kb>1){fore=1-.55*Math.min(1,kb/90);ext=Math.max(ext,R.upperLeg*fore+R.lowerLeg)}}
   const hx=side?(i?-8:8):m*R.hipX,lower=side&&C.p.lowerLegSide?C.p.lowerLegSide:C.p.lowerLeg;
+  /* a lifted foot folds the knee toward the camera (thigh and shin foreshorten) instead of sliding the whole leg up */
+  const KL=window.AnimatoIK,lf=(KL&&lift>0&&!side)?KL.legLift(lift,R.upperLeg,R.lowerLeg):null;
+  if(lf)return `<g transform="translate(${f(hx)},${f(hipY)}) rotate(${f(th)})"><g transform="scale(1,${f(fore*lf.thigh)})">${C.p.upperLeg}</g><g transform="translate(0,${f(R.upperLeg*fore*lf.thigh)}) scale(1,${f(lf.shin)})">${lower}</g></g>`;
   return `<g transform="translate(${f(hx)},${f(hipY-lift)}) rotate(${f(th)})"><g transform="scale(1,${f(fore)})">${C.p.upperLeg}</g><g transform="translate(0,${f(R.upperLeg*fore)})${kn?` rotate(${f(kn)})`:''}">${lower}</g></g>`};
  const arm=(i,near)=>{const m=i?1:-1;let sx,tu,tf;
   if(side){const u=(a[i*2]-68),fa=a[i*2+1]*.5;sx=0;tu=-u;tf=fa+u}
-  else{sx=m*R.shoulderX;const ua=a[i*2],fa=a[i*2+1];tu=m<0?ua:-ua;tf=(m<0?fa:-fa)-tu}
+  else{sx=m*R.shoulderX;const ua=a[i*2],fa=a[i*2+1],K=window.AnimatoIK;
+   /* a real two-bone arm for THIS character's bone lengths (public/character-ik.js): the hand goes where the pose says, the elbow bends like an elbow */
+   if(K){const q=K.puppetArm(i,ua,fa,R);tu=q.tu;tf=q.tf}else{tu=m<0?ua:-ua;tf=(m<0?fa:-fa)-tu}}
   return `<g transform="translate(${f(sx)},${f(shY)}) rotate(${f(tu)})">${C.p.upperArm}<g transform="translate(0,${f(R.upperArm)}) rotate(${f(tf)})">${C.p.foreArm}</g></g>`};
  let legs=side?leg(1)+leg(0):leg(0)+leg(1);
  const tors=`<g transform="translate(0,${f(hipY)})${side&&!C.p.torsoSide?' scale(.85,1)':''}">${pick('torso')}</g>`;
@@ -3781,8 +3911,12 @@ function puppet(C,Pz,talk,mo,blk,view,uid){const R=C.rig,side=view==='side',back
  let fcs={svg:'',mouth:false};
  {const FM=C.face&&window.AnimatoCharPack&&window.AnimatoCharPack.faceMarkup;
   if(FM&&!back){const e=Pz.emo||{},lip=talk?globalThis.__animatoLip:null,BR={happy:[.2,.3],calm:[0,0],sad:[.9,-.1],angry:[-.9,-.2]},bn=BR[Pz.fb]||BR.calm;
-   let mn,opn=null;if(talk){if(lip&&lip.v){mn=lip.v;opn=lip.open}else{mn=mo<.12?'rest':mo<.4?'E':mo<.7?'O':'AI';opn=mo}}else mn=e.m||Pz.fm||'flat';
-   try{fcs=FM(C.face,{gx:e.gx||0,gy:e.gy||0,tilt:e.tilt!==undefined?e.tilt:bn[0],raise:e.raise!==undefined?e.raise:bn[1],eye:e.eye,yaw:Pz.yaw,pitch:Pz.pitch,mouth:mn,open:opn},side?'side':'front')}catch(x){fcs={svg:'',mouth:false}}}}
+   let mn,opn=null,m2='',mx=0,wd=null;const mood=e.m||Pz.fm||'flat';
+   if(talk){if(lip&&lip.v){opn=lip.open;wd=lip.m?lip.m.wide:null;
+     if(lip.v==='REST'){mn=/^(smile|grin|smirk|frown|flat)$/i.test(mood)?mood:'rest'}  /* a pause between words keeps the face's mood */
+     else if(lip.va&&lip.vb&&lip.va!==lip.vb){mn=lip.va;m2=lip.vb;mx=lip.k||0}else mn=lip.v}
+    else{mn=mo<.12?'rest':mo<.4?'E':mo<.7?'O':'AI';opn=mo}}else mn=mood;
+   try{fcs=FM(C.face,{gx:e.gx||0,gy:e.gy||0,tilt:e.tilt!==undefined?e.tilt:bn[0],raise:e.raise!==undefined?e.raise:bn[1],eye:e.eye,yaw:Pz.yaw,pitch:Pz.pitch,mouth:mn,mouth2:m2,mix:mx,wide:wd,open:opn},side?'side':'front')}catch(x){fcs={svg:'',mouth:false}}}}
  const mo2=C.mouth,op=fcs.mouth?'':(side&&C.p.mouthOpenSide?C.p.mouthOpenSide:C.p.mouthOpen),ec=side&&C.p.eyesClosedSide?C.p.eyesClosedSide:C.p.eyesClosed,nod=(talk&&!op&&!fcs.mouth)?mo*3:0;
  const htr=`translate(${f(Pz.hx||0)},${f((Pz.hy||0)+nod)}) rotate(${f(Pz.hr||0)} 0 ${f(neckY)}) translate(0,${f(neckY)})`,hbk=side?C.p.headBehindSide:back?'':C.p.headBehind,behind=hbk?`<g transform="${htr}">${hbk}</g>`:'';
  const hd=`<g transform="${htr}">${pick('head').replace('<g data-face="1"></g>',fcs.svg)}${talk&&op?`<g transform="translate(${mo2[0]},${mo2[1]}) scale(1,${f(.25+mo*1.1)}) translate(${-mo2[0]},${-mo2[1]})">${op}</g>`:''}${ec&&blk<.55?ec:''}</g>`;
@@ -3864,7 +3998,7 @@ let MYBG=[],MYBG_SRC=(()=>{try{return localStorage.getItem('stk_bg_src')==='mine
 const MB=()=>window.AnimatoMyBg;
 const myBgOn=()=>MYBG_SRC==='mine'&&MYBG.length>0;
 const myBgBlock=()=>{const M=MB();return myBgOn()&&M?M.myBackgroundBlock(MYBG,PROJ_AR):''};
-function initMyBg(){if(MYBG_READY)return MYBG_READY;MYBG_READY=(async()=>{const M=MB();if(!M)return;MYBG_STORE=M.createBgStore();try{MYBG=await MYBG_STORE.all()}catch(e){MYBG=[]}renderBgPanels();try{refreshPromptPreviews()}catch(e){}})();return MYBG_READY}
+function initMyBg(){if(MYBG_READY)return MYBG_READY;if(!MB())return Promise.resolve();MYBG_READY=(async()=>{const M=MB();MYBG_STORE=M.createBgStore();try{MYBG=await MYBG_STORE.all()}catch(e){MYBG=[]}renderBgPanels();try{refreshPromptPreviews()}catch(e){}})();return MYBG_READY}
 
 /* CONTENT TYPE: what kind of video (movie / narration / presenter). Saved on the device; adds a block to the prompt. */
 let CTYPE=(()=>{try{const v=localStorage.getItem('stk_ctype');return window.AnimatoCT&&window.AnimatoCT.isType(v)?v:'narration'}catch(e){return'narration'}})();
@@ -3911,8 +4045,11 @@ async function bgSavePending(pid){
  const el=document.querySelector('[data-mb-name="'+pid+'"]'),typed=M.cleanBgName(el?el.value:q.name);
  if(!typed){MYBG_MSG='Type a name for this background first.';renderBgPanels();if(el)el.focus();return}
  const name=M.uniqueBgName(typed,MYBG),rec={id:'bg'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name,w:q.w,h:q.h,data:q.data,thumb:q.thumb,floor:q.floor,at:Date.now()};
- try{await MYBG_STORE.put(rec)}catch(e){MYBG_MSG='Could not save on this device (storage is full or blocked).';renderBgPanels();return}
- MYBG.push(rec);MYBG_PEND=MYBG_PEND.filter(x=>x.pid!==pid);MYBG_MSG='';renderBgPanels();try{refreshPromptPreviews()}catch(e){}}
+ /* The store is made on the spot if it was not ready yet; if the browser blocks its storage the picture is still kept for this visit (in memory) instead of failing */
+ if(!MYBG_STORE){try{MYBG_STORE=M.createBgStore()}catch(e){}}
+ if(!MYBG_STORE){const mem=new Map();MYBG_STORE={async all(){return[...mem.values()]},async put(r){mem.set(r.id,r);return true},async remove(i){mem.delete(i);return true}}}
+ try{await MYBG_STORE.put(rec)}catch(e){try{const mem=new Map();MYBG_STORE={async all(){return[...mem.values()]},async put(r){mem.set(r.id,r);return true},async remove(i){mem.delete(i);return true}};await MYBG_STORE.put(rec);MYBG_MSG='This browser blocks saving, so the picture is kept only until you close the app.'}catch(x){MYBG_MSG='Could not save this picture. Try a smaller one.';renderBgPanels();return}}
+ MYBG.push(rec);MYBG_PEND=MYBG_PEND.filter(x=>x.pid!==pid);if(!/blocks saving/.test(MYBG_MSG))MYBG_MSG='';renderBgPanels();try{refreshPromptPreviews()}catch(e){}}
 /* the contact sheet: all pictures with their numbers and names, 12 to a page (JPEG files) */
 async function bgSheetBlobs(){
  const M=MB();if(!M||!MYBG.length)return[];const out=[],imgs=await Promise.all(MYBG.map(b=>new Promise(ok=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>ok(null);im.src=b.data})));
@@ -4018,6 +4155,7 @@ function guidedBrief({mode,title,idea,cast,setting,audience,tone,anim,extra,voPl
  const GD=GDM,script=String(scriptText||'').trim();
  let verbatim='',premise=idea||'';
  if(mode==='pro'&&script){const need=GD.beatsForScript(script);if(need.words>=targetSec*GD.WPS*0.6){verbatim=script;premise=''}else premise=script}
+ try{window.__EXPECT_SEC=targetSec;localStorage.setItem('animato_expect_sec',JSON.stringify({s:targetSec,t:Date.now()}))}catch(e){}
  return{title,idea:premise,cast,setting,audience,tone,extra:guidedExtra(anim,extra),durationSec:targetSec,voPlatform,aspect:PROJ_AR,style:SELECTED_CHARACTER,lookOptions:guidedLook(SELECTED_CHARACTER),packCast:packCastLines(),script:verbatim,bgMode:BG_MODE,myBg:myBgBlock(),contentType:CTYPE}}
 function buildGuidedWizPrompt(){const f=wizVals(),Gen=window.AnimatoGen;
  return myBgFix(GDM.buildGuidedPrompt(guidedBrief({mode:'wizard',title:f.title,idea:f.idea,cast:f.cast,setting:f.setting,audience:f.audience,tone:f.tone,anim:f.anim,extra:f.extra,voPlatform:f.voPlatform,targetSec:Gen.parseDurationSeconds(f.duration)})))}
@@ -4048,16 +4186,27 @@ function walkerOf(sc){if(sc._wk!==undefined)return sc._wk;let w=-1;const d=Math.
   for(const f of [.08,.25,.45,.65,.85]){try{const e=evalPose(c.animate,d*f);if(e&&(Array.isArray(e.kn)||(Array.isArray(e.l)&&Math.abs(+e.l[0]||0)+Math.abs(+e.l[1]||0)>10))){w=k;break}}catch(e){}}});
  return sc._wk=w}
 function camV(sc,T,A,S,info){let c={};try{c=(typeof sc.camera==='function'?sc.camera(T):sc.camera)||{}}catch(e){if(patchPlayEnvErr(e)){try{c=(typeof sc.camera==='function'?sc.camera(T):sc.camera)||{}}catch(e2){PL.err=e2.message}}else PL.err=e.message}
- let z=Math.min(3,Math.max(1,pn(c.zoom,1)));const hw=A.FW/2,hasX=c.x!==undefined&&c.x!==null&&isFinite(+c.x);let cx=(hasX&&!(S&&S.reframe))?(A.k==='9:16'&&!(S&&S.noVStage)?vMapX(sc,+c.x):+c.x):(A.k==='9:16'?autoX(info||[]):800);
+ let z=Math.min(sc._named?4.2:3,Math.max(1,pn(c.zoom,1)));const hw=A.FW/2,hasX=c.x!==undefined&&c.x!==null&&isFinite(+c.x);let cx=(hasX&&!(S&&S.reframe))?(A.k==='9:16'&&!(S&&S.noVStage)&&!sc._namedLive?vMapX(sc,+c.x):+c.x):(A.k==='9:16'?autoX(info||[]):800);
  let cy=pn(c.y,450);
+ /* CINEMA (public/cinema.js): a camera the AI left still gets a shot rhythm that follows the phrases, eased moves and a slow push */
+ try{const CN=window.AnimatoCinema,dur=pn(sc.duration,5);if(CN&&sc.cinema!==false&&sc._directed&&!sc._named&&A.k==='9:16'&&!(S&&S.noVStage)){const n2=(info||[]).length;if(z<(n2>1?1.45:1.75)){z=n2>1?1.45:1.75}
+  /* SWOOP: a new moment opens wide, the person small in the world, and the camera flies in to them, then keeps creeping */
+  if(CN.swoopAt&&dur>=1.5){const w=CN.swoopAt(sc,T,dur);z=(1+(z-1)*w.k)*w.creep;c={...c,rot:pn(c.rot,0)+w.tilt}}
+  cy+=190/z}
+ if(CN&&sc.cinema!==false&&!sc._directed&&dur>=2&&(sc.captions||[]).length){
+  if(sc._camStatic===undefined){let zs=[],xs=[];for(let q=0;q<=8;q++){let cc={};try{cc=(typeof sc.camera==='function'?sc.camera(dur*q/8):sc.camera)||{}}catch(e){}zs.push(pn(cc.zoom,1));xs.push(pn(cc.x,800))}sc._camStatic=Math.max(...zs)-Math.min(...zs)<.45&&Math.max(...xs)-Math.min(...xs)<260}
+  if(sc._camStatic){const ppl=(info||[]).map(o=>({k:o.k,x:o.x,hw:o.hw}));const r=CN.cinema(sc,T,dur,{x:cx,y:cy,z,r:pn(c.rot,0)},ppl,{portrait:A.k==='9:16'});z=r.z;cx=r.x;cy=r.y;c={...c,rot:r.r}}}}catch(e){window.__cinErr=e.message}
  /* FOLLOW THE WALKER: people never turn sideways, so a person who walks or runs in the shot is followed by the camera: it moves in a
     little and pans with them for the whole scene (no jump when they start or stop) */
  {const wk=walkerOf(sc);if(wk>=0&&!(S&&S.noTrack)){const o=(info||[]).find(q=>q.k===wk);if(o){const zt=A.k==='9:16'?1.06:1.32;z=Math.max(z,zt);cx=cx*.15+o.x*.85;cy=Math.min(cy,pn(c.y,450))}}}
  /* PORTRAIT: the whole group always stays in the picture (a push-in stops where it would cut somebody off; the camera drifts only inside the spare room and no longer chases the talker out of the frame) */
- if(A.k==='9:16'&&!(S&&S.noVStage)&&window.AnimatoPStage){const grp=(info||[]).filter(o=>o.pv).map(o=>({x:o.x,hw:o.hw}));if(grp.length){const fg=window.AnimatoPStage.frameGroup({z,cx},grp);z=fg.z;cx=fg.cx}}
+ if(A.k==='9:16'&&!(S&&S.noVStage)&&!sc._named&&window.AnimatoPStage){const grp=(info||[]).filter(o=>o.pv).map(o=>({x:o.x,hw:o.hw}));if(grp.length){const fg=window.AnimatoPStage.frameGroup({z,cx},grp);z=fg.z;cx=fg.cx}}
  /* vertical: people are drawn at a different size (vStage), so a camera aimed at a face aims at the same face: higher when they are bigger, lower when they are smaller */
- if(A.k==='9:16'&&!(S&&S.noVStage)&&z>1.05){const v=vStage(sc);cy=790-(790-cy)*v.f}
+ if(A.k==='9:16'&&!(S&&S.noVStage)&&z>1.05&&!sc._namedLive){const v=vStage(sc);cy=790-(790-cy)*v.f}
+ /* PORTRAIT: a close-up never crops down to a lone hand: the tall frame always keeps head-to-hip (or more) of the person it is near */
+ if(A.k==='9:16'&&!(S&&S.noVStage)&&window.AnimatoPStage){const PS=window.AnimatoPStage,ppl=(info||[]).filter(o=>!o.pres&&o.s>0&&(o.pv||o.gy!==undefined)),cap=PS.bodyZoomCap(ppl,cx);if(z>cap){const near=ppl.length?ppl.reduce((m,o)=>Math.abs(o.x-cx)<Math.abs(m.x-cx)?o:m,ppl[0]):null,zw=z;z=cap;cy=PS.bodyCentreY(cy,zw,cap,near&&near.gy!==undefined?near:null)}}
  return{z,x:CL(cx,hw/z,1600-hw/z),y:CL(cy,450/z,900-450/z),r:pn(c.rot,0)}}
+const camTfBg=(c,A)=>{const PS=window.AnimatoPStage,b=PS&&PS.backdropCamera?PS.backdropCamera(c,(A||FMT).FW):c;return camTf(b,A)};
 const camTf=(c,A)=>`translate(${(A||FMT).FW/2},450) rotate(${c.r}) scale(${c.z}) translate(${-c.x},${-c.y})`;
 /* Real pictures (Realistic mode): public/photo-tags.js draws them, public/photo-store.js finds and keeps them. PH_LIVE: the live preview uses short blob: addresses, an export needs the picture inside the svg. */
 let PH_LIVE=true,PH_REF=false,PV_PH_VER=-1;
@@ -4104,7 +4253,11 @@ function estW(svg){svg=String(svg);let a=1e9,b=-1e9;const add=(x0,x1)=>{if(isFin
  return b>a?b-a:0}
 /* where each person stands in this frame (by cast name), so a drawing can walk with them: follow:'hero' (a dog, a bag, a bike), with an optional leash from their hand */
 let FRAME_POS={};
-function followAt(p,x,y){const P=FRAME_POS[p.follow]||FRAME_POS['#0'];if(!P)return null;const dir=P.fl?-1:1;return{x:P.x+(p.fdx||0)*P.s*dir,y:P.y+(p.fdy||0)*P.s,dir,P}}
+function followAt(p,x,y){const P=FRAME_POS[p.follow]||FRAME_POS['#0'];if(!P)return null;const dir=P.fl?-1:1;
+ /* held or worn things sit on the right body part of THIS character's style (a towel in the hand, a belt at the waist, a hat on the head) */
+ const at=p.fat||p.at,SH=window.AnimatoShots;if(at&&SH&&SH.bodyOf){const b=SH.bodyOf(P.st),fr={hand:b.hands,hands:b.hands,waist:b.waist,hip:b.waist,head:(b.eye+1)/2+.02,hat:1.0,face:(b.eye+b.chin)/2,neck:b.chin-.02,shoulder:b.chest+.04,chest:b.chest,back:b.chest,feet:.03,foot:.03}[String(at).toLowerCase()];
+  if(fr!==undefined)return{x:P.x+(p.fdx||0)*P.s*dir,y:P.y-598*P.s*fr+(p.fdy||0)*P.s,dir,P}}
+ return{x:P.x+(p.fdx||0)*P.s*dir,y:P.y+(p.fdy||0)*P.s,dir,P}}
 function propsSvg(sc,T,front,cam,scr,A){A=A||FMT;const P9=A.k==='9:16';let o='';sc.props.forEach(p0=>{const lay=(p0&&p0.photo!==undefined&&PHT())?photoPlan(sc,A).m.get(p0):null,p=lay?Object.assign({},p0,{x:lay.x,y:lay.y,w:lay.w,h:lay.h,show:lay.show,screen:lay.scr,layer:'back',par:0}):p0;if(!p||!!p.screen!==!!scr||(!scr&&(p.layer==='front')!==front))return;if(Array.isArray(p.show)&&(T<p.show[0]||T>=p.show[1]))return;
  let a={};try{a=(typeof p.animate==='function'?p.animate(T):null)||{}}catch(e){PL.err=e.message}
  if(p.photo!==undefined&&PHT()){const pe=PHT().photoShowEnvelope(T,p.show);a=Object.assign({},a,{opacity:pn(a.opacity,1)*pe.op,scale:pn(a.scale,1)*pe.scale})}
@@ -4199,18 +4352,18 @@ function computeFrame(T0,live,S,idPrefix){S=S||PL;const fx=idPrefix||(live?'lv_'
   /* AMBIENT LIFE (public/liveliness.js): breathing, weight shift, beat gestures while speaking, nods while listening; never over a walk, reaction or action */
   try{const AL=window.AnimatoAlive;if(AL&&c.alive!==false){const busy=!!(window.__reactKind||(activeCue&&(activeCue.anim||activeCue.react))||(c._autoAct&&window.AnimatoActing&&window.AnimatoActing.autoPose(c._autoAct,T))||Array.isArray(E.kn)||E.px!==undefined),talkingNow=k===speakerK&&(speakingNow||TALK),listen=!talkingNow&&(speakingNow||(typeof sc.captions!=='undefined'&&sc.captions&&sc.captions.length>0));
    const st=(window.AnimatoMotion&&window.AnimatoMotion.stressAt&&wordPos)?+window.AnimatoMotion.stressAt(wordPos,T0)||.5:.5;
-   AL.applyAmbient(POSE,AL.ambientPose(k,T,{talking:talkingNow,listening:listen,stress:st,busy}),busy?.5:1)}}catch(e){}
+   const bt=AL.beatFrom?AL.beatFrom(wordPos):null;AL.applyAmbient(POSE,AL.ambientPose(k,T,{talking:talkingNow,listening:listen,stress:st,busy,beat:bt}),busy?.55:1)}}catch(e){}
   let lipOn=false;if(MOT&&TALK){const lp=MOT.lipAt(wordPos,speechEnv===null?null:Math.min(1,speechEnv*1.45),T0,k*1.7);MO=lp.open;MOT.setLip(lp);lipOn=true}
   let vw=E.view||c.view;const fl=E.flip!==undefined?E.flip:c.flip;let demoted=false;
   /* the profile view looks bad on most characters, so only a WALKING person is shown from the side; a person standing or talking is drawn
      front-on, slightly narrower and looking toward the side (a 2.5D turn: depth without distortion) */
   /* NO SIDE VIEWS (the person's choice): anyone drawn from the side is drawn facing the camera, the head turned a little toward where they are going; the camera follows walkers (camV) */
   if(vw==='side'){vw='front';demoted=true;if(POSE.hx===undefined||POSE.hx===0)POSE.hx=(fl?-1:1)*.8}
-  const gx=E.px!==undefined?E.px:(+c.x||800),gy=E.py!==undefined?E.py:(+c.ground||790),q=pn(c.par,0);
+  const gx=E.px!==undefined?E.px:(+c.x||800),gy=E.py!==undefined?E.py:(+c.ground||790),q0=pn(c.par,0);let q=q0;
   let s=+c.scale||.85;if(E.py!==undefined)s*=.78+.34*CL((gy-700)/180);
   /* every style stands the same height at the same scale (measured: human 596, stickman 648, doodle 657, original 722), so sizes and close-ups mean the same thing in every style */
   {const rs=String(c.style||c.type||S.style||''),ns=window.AnimatoCharStyles?window.AnimatoCharStyles.normalizeStyle(rs):'';if(c.custom==null){s*=ns==='human'?1:ns==='doodle'?.91:rs==='stickman'?.92:rs==='custom'?1:.83}}
-  let gxv=gx,gyv=gy,vPv=false,vBack=false,vHw=0,vOrd,vMob;if(P9&&!S.noVStage&&!c.far&&!(q<0)){const v=vStage(sc),PSG=window.AnimatoPStage;gxv=vMapX(sc,gx);s=Math.min(s*v.f,1.15);vPv=true;vOrd=v.ord?v.ord[k]:undefined;vMob=v.mob?v.mob[k]:undefined;if(PSG){if(v.back&&v.back.has(k)){vBack=true;s*=PSG.BACK_ROW.scale;gyv=gy-PSG.BACK_ROW.up}vHw=PSG.FOOT[PSG.kindOf(c,S.style,window.AnimatoCharStyles&&window.AnimatoCharStyles.normalizeStyle)]*s/2}}
+  let gxv=gx,gyv=gy,vPv=false,vBack=false,vHw=0,vOrd,vMob;if(P9&&!S.noVStage&&!c.far&&!(q<0)){const v=vStage(sc),PSG=window.AnimatoPStage;gxv=vMapX(sc,gx);s=Math.min(s*v.f,1.15);vPv=true;vOrd=v.ord?v.ord[k]:undefined;vMob=v.mob?v.mob[k]:undefined;if(PSG){if(v.back&&v.back.has(k)){vBack=true;s*=PSG.BACK_ROW.scale;if(q0===0&&PSG.PAR_BACK_ROW)q=PSG.PAR_BACK_ROW;gyv=gy-PSG.BACK_ROW.up}vHw=PSG.FOOT[PSG.kindOf(c,S.style,window.AnimatoCharStyles&&window.AnimatoCharStyles.normalizeStyle)]*s/2}}
   const cn=c.custom!=null?String(c.custom):(S.style==='custom'&&!c.style&&!c.type?Object.keys(CUSTOMS)[0]:'');let cp=cn?CUSTOMS[cn]:null;if(cn&&!cp){regCustom(cn,{},CUSTOMS);cp=CUSTOMS[cn]||null}
   const CSM=window.AnimatoCharStyles,nsy=(!cp&&CSM)?CSM.normalizeStyle(c.style||c.type||S.style):'',stk=!cp&&!nsy&&(c.style||c.type||S.style)==='stickman',g0=()=>cp?puppet(cp,Object.assign({},POSE,{fb:P.brow,fm:P.mouth}),TALK,MO,BL,vw,fx+'cp'+k):nsy?(()=>{const rr=CSM.renderCharacterStyleEx(nsy,stickLook,POSE,TALK,MO,BL,vw,fx+'ns'+k,k);if(rr.defs&&!hdSeen.has(rr.defsId)){hdSeen.add(rr.defsId);cdefs+=rr.defs}return rr.svg})():stk?STICK.render(stickLook,POSE,TALK,MO,BL,vw,fx+'sk'+k):(vw==='side'?side:vw==='back'?back:front)(P).split('url(#hg)').join('url(#'+fx+'hg'+k+')');
   /* a style that fails to draw (or draws nothing) falls back to the default character, so nobody ever disappears */
@@ -4218,7 +4371,7 @@ function computeFrame(T0,live,S,idPrefix){S=S||PL;const fx=idPrefix||(live?'lv_'
   if(lipOn&&MOT)MOT.setLip(null);
   if(!g||!String(g).trim()){try{g=front(P).split('url(#hg)').join('url(#'+fx+'hg'+k+')');if(live&&!PL.drawFallback){PL.drawFallback=true;console.warn('A character could not be drawn in its style. The default character was used.')}}catch(e){g=''}}
   cdefs+=`<linearGradient id="${fx}hg${k}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(P.hairc,1.07)}"/><stop offset="1" stop-color="${shade(P.hairc,.93)}"/></linearGradient>`;
-  const bpo={pres:c.presenter?(String(c.presenter).toLowerCase()==='left'?'left':'right'):'',pscale:+c.scale||0,gy:gyv,gx:gxv,q,s,fl,g,nh:cp?700:nsy==='human'?604:nsy==='doodle'?640:stk?650:722,sx:demoted?1:(1-.36*(cpz.turn||0)),pv:vPv,back:vBack,hw:vHw,o:vOrd,mob:vMob};built.push(bpo);FRAME_POS[c._who||('#'+k)]={x:gxv,y:gyv,s,fl:!!fl};if(!FRAME_POS['#'+k])FRAME_POS['#'+k]=FRAME_POS[c._who||('#'+k)];bpo.fp=FRAME_POS[c._who||('#'+k)];const ifo={x:gxv,s,talk:TALK,k,pv:vPv,hw:vHw};infos.push(ifo);bpo.inf=ifo});
+  const bpo={pres:c.presenter?(String(c.presenter).toLowerCase()==='left'?'left':'right'):'',pscale:+c.scale||0,gy:gyv,gx:gxv,q,s,fl,g,nh:cp?700:nsy==='human'?604:nsy==='doodle'?640:stk?650:722,sx:demoted?1:(1-.36*(cpz.turn||0)),pv:vPv,back:vBack,hw:vHw,o:vOrd,mob:vMob};built.push(bpo);FRAME_POS[c._who||('#'+k)]={x:gxv,y:gyv,s,fl:!!fl,st:cp?'custom':nsy||(stk?'stickman':'original'),sc,T};if(!FRAME_POS['#'+k])FRAME_POS['#'+k]=FRAME_POS[c._who||('#'+k)];bpo.fp=FRAME_POS[c._who||('#'+k)];const ifo={x:gxv,s,talk:TALK,k,pv:vPv,hw:vHw,gy:gyv};infos.push(ifo);bpo.inf=ifo});
  BL=1;[P,POSE,TALK,MO]=sv;if(P9&&!S.noVStage&&window.AnimatoPStage){const pvs=built.filter(b=>b.pv&&!b.pres);window.AnimatoPStage.separate(pvs);pvs.forEach(b=>{b.fp.x=b.gx;b.inf.x=b.gx})}const cam=camV(sc,T,A,S,infos);cam.z*=1+(rl<.4?(1-EZ(rl/.4))*.045:0);
  const LT=window.AnimatoLight,items=built.map((b,bi)=>{let sh='',body=b.g;/* light and shade from the set's light, so the person stands inside the place */if(LT&&!b.nolight&&!b.pres){try{const lc=LT.lightCharacter({scene:sc,x:b.gx,flip:!!b.fl,id:fx+'lc'+bi+'_',svg:b.g,height:b.nh,lite:!!(live&&QLITE)});sh=lc.shadow;body=lc.body}catch(e){sh='';body=b.g}}if(b.pres){const k9=P9?.62:1,ps=b.pscale||(P9?.4:.56),px=b.pres==='left'?(P9?96:215)*k9:FW-(P9?96:215)*k9,flp=b.pres==='right'?-1:1;return{gy:9999,pres:1,svg:`<g transform="translate(${px},${P9?884:890}) scale(${flp*ps},${ps}) translate(0,-880)">${body}</g>`,px,ps}}
 return{gy:b.gy,svg:`<g transform="translate(${b.gx+(cam.x-800)*b.q},${b.gy+(cam.y-450)*b.q}) scale(${(b.fl?-b.s:b.s)*b.sx},${b.s}) translate(0,-880)">${sh}${body}</g>`}});items.sort((a,b)=>a.gy-b.gy);
@@ -4250,7 +4403,7 @@ return{gy:b.gy,svg:`<g transform="translate(${b.gx+(cam.x-800)*b.q},${b.gy+(cam.
    if(P9&&c.style!=='lines'&&!(S&&S.capLines)&&ws.length){const ch=[];let cur=[],cl2=0;ws.forEach((w,wi3)=>{if(cur.length&&(cur.length>=3||cl2+w.length>13)){ch.push(cur);cur=[];cl2=0}cur.push(wi3);cl2+=w.length+1;if(/[.,!?;:]$/.test(w)){ch.push(cur);cur=[];cl2=0}});if(cur.length)ch.push(cur);
     const grp=ch.find(g=>g.includes(act))||ch[0],txt=grp.map(k=>ws[k]).join(' '),fs=Math.min(78,Math.floor(430/(Math.max(4,txt.length)*.7))),first=grp[0]===act,pop=first?1.07:1,kp=EZ((capT-c.from)/.12);
     const words=grp.map(k=>`<tspan fill="${k===act?'#ffd54a':'#ffffff'}">${esc(ws[k].toUpperCase())}</tspan>`).join('<tspan> </tspan>');
-    cap+=`<g opacity="${kp}" transform="translate(800 650) scale(${pop})"><text x="0" y="0" text-anchor="middle" font-size="${fs}" font-weight="900" font-family="Impact,'Arial Black',Arial,sans-serif" letter-spacing="1" stroke="#000" stroke-width="${(fs*.2).toFixed(1)}" stroke-linejoin="round" paint-order="stroke">${words}</text></g>`;continue}
+    cap+=`<g opacity="${kp}" transform="translate(800 615) scale(${pop*(1+.22*(1-kp))})"><text x="0" y="0" text-anchor="middle" font-size="${fs}" font-weight="900" font-family="Impact,'Arial Black',Arial,sans-serif" letter-spacing="1" stroke="#000" stroke-width="${(fs*.2).toFixed(1)}" stroke-linejoin="round" paint-order="stroke">${words}</text></g>`;continue}
    const ka=EZ((capT-c.from)/.18),yb=(P9?792:842)-(1-ka)*14,y0=yb-(ls.length-1)*lh;let wi=0;
    const mk=(under)=>ls.map((ln,li)=>`<text x="800" y="${(y0+li*lh).toFixed(0)}" text-anchor="middle" font-size="${sz}" font-weight="900" font-family="Impact,'Arial Black',Arial,sans-serif" letter-spacing="1" ${under?`fill="#000" stroke="#000" stroke-width="${(sz*.22).toFixed(1)}" stroke-linejoin="round"`:''}>${ln.map(w=>{const k=wi++,col=under?'#000':(k===act?'#ffd54a':(k<act?'#ffffff':'#ffffff'));const op=(!under&&k>act)?.62:1;return `<tspan fill="${col}" fill-opacity="${op}">${esc(w)}</tspan>`}).join('<tspan> </tspan>')}</text>`).join('');
    cap+=`<rect x="${800-FW/2}" y="640" width="${FW}" height="260" fill="url(#${fx}cg)" opacity="${ka}"/><g opacity="${ka}">${mk(true)}`;wi=0;cap+=`${mk(false)}</g>`}}
@@ -4259,29 +4412,41 @@ return{gy:b.gy,svg:`<g transform="translate(${b.gx+(cam.x-800)*b.q},${b.gy+(cam.
  const wait='';
  const phBg=!!PHT()&&PHT().isPhotoBackground(sc.background),phV=phBg?phVer():0;PH_LIVE=!!live;
  if(phBg&&sc._phV!==phV){sc._phV=phV;sc._phB={};sc._bgL=null}
- const myB=myBgRec(sc.background),rawBg=myB?(sc._myS||(sc._myS={}))[(live?'l':'e')+A.k]||(sc._myS[(live?'l':'e')+A.k]=myBgSvg(myB,!!live,A)):phBg?(sc._phB[(live?'l':'e')+A.k]||(sc._phB[(live?'l':'e')+A.k]=photoBgSvg(sc.background,!!live,A))):(sc._bg||(sc._bg=polishBg(cleanSvg(BGP[sc.background]||sc.background||BGP.outdoor)))),kbT=phBg?PHT().backgroundKb(Math.round(rl*6)/6,len,'in'):'',bg=live?((sc._bgL||(sc._bgL={}))[fx]||(sc._bgL[fx]=scopeSvgIds(rawBg,fx))):scopeSvgIds(rawBg,fx),dyn=scopeSvgIds(propsSvg(sc,T,false,cam,false,A)+items.filter(o=>!o.pres).map(o=>o.svg).join('')+propsSvg(sc,T,true,cam,false,A),fx),over=tn+`<rect width="${FW}" height="900" fill="url(#${fx}vg)"/><g transform="translate(${SX},0)">${scopeSvgIds(propsSvg(sc,T,true,{x:800,y:450},true,A),fx)}</g><rect width="${FW}" height="900" fill="#fff" opacity="${CL(fl2)}"/>${(()=>{const pr=items.filter(o=>o.pres);return pr.length?pr.map(o=>{const w=P9?170:330,x0=o.px-w/2;return`<g opacity=".92"><rect x="${x0}" y="${P9?560:430}" width="${w}" height="${P9?340:470}" rx="26" fill="#0b1020" opacity=".32"/><ellipse cx="${o.px}" cy="${P9?886:892}" rx="${w*.36}" ry="11" fill="#000" opacity=".35"/>${scopeSvgIds(o.svg,fx+'pr')}</g>`}).join(''):''})()}<g transform="translate(${SX},0)">${cap}</g><rect width="${FW}" height="900" fill="#000" opacity="${fade}"/>${wait}`;
- return{FW,fx,sc,cdefs,bg,kb:kbT,phV,camTfStr:camTf(cam,A),dyn,over,i}}
+ const myB=myBgRec(sc.background),rawBg=myB?(sc._myS||(sc._myS={}))[(live?'l':'e')+A.k]||(sc._myS[(live?'l':'e')+A.k]=myBgSvg(myB,!!live,A)):phBg?(sc._phB[(live?'l':'e')+A.k]||(sc._phB[(live?'l':'e')+A.k]=photoBgSvg(sc.background,!!live,A))):(sc._bg||(sc._bg=polishBg(cleanSvg(BGP[sc.background]||sc.background||BGP.outdoor)))),kbT=phBg?PHT().backgroundKb(Math.round(rl*6)/6,len,'in'):'',bg=live?((sc._bgL||(sc._bgL={}))[fx]||(sc._bgL[fx]=scopeSvgIds(rawBg,fx))):scopeSvgIds(rawBg,fx),DP=(()=>{try{const Dp=window.AnimatoDepth;return Dp?Dp.depthLayers(sc,T,cam,FW,fx,{lite:!!(live&&QLITE)}):{back:'',front:'',defs:''}}catch(e){return{back:'',front:'',defs:''}}})(),dyn=DP.back+scopeSvgIds(propsSvg(sc,T,false,cam,false,A)+items.filter(o=>!o.pres).map(o=>o.svg).join('')+propsSvg(sc,T,true,cam,false,A),fx),over=tn+(DP.front?`<defs>${DP.defs}</defs>${DP.front}`:'')+`<rect width="${FW}" height="900" fill="url(#${fx}vg)"/><g transform="translate(${SX},0)">${scopeSvgIds(propsSvg(sc,T,true,{x:800,y:450},true,A),fx)}</g><rect width="${FW}" height="900" fill="#fff" opacity="${CL(fl2)}"/>${(()=>{const pr=items.filter(o=>o.pres);return pr.length?pr.map(o=>{const w=P9?170:330,x0=o.px-w/2;return`<g opacity=".92"><rect x="${x0}" y="${P9?560:430}" width="${w}" height="${P9?340:470}" rx="26" fill="#0b1020" opacity=".32"/><ellipse cx="${o.px}" cy="${P9?886:892}" rx="${w*.36}" ry="11" fill="#000" opacity=".35"/>${scopeSvgIds(o.svg,fx+'pr')}</g>`}).join(''):''})()}<g transform="translate(${SX},0)">${cap}</g><rect width="${FW}" height="900" fill="#000" opacity="${fade}"/>${wait}`;
+ return{FW,fx,sc,cdefs,bg,kb:kbT,phV,camTfStr:camTf(cam,A),bgTfStr:camTfBg(cam,A),dyn,over,i}}
 /* Human characters soften shadows with SVG blur filters. By default the browser converts every pixel to linear colour and back for each blur, which is the slowest part of drawing (and exporting) a human.
    Blurring in plain sRGB looks the same to the eye and is much cheaper, so every filter is told to use it. */
 function frameSvg(T0,live,S){const s=frameSvg0(T0,live,S);return s.indexOf('<filter ')<0?s:s.replace(/<filter (?![^>]*color-interpolation-filters)/g,'<filter color-interpolation-filters="sRGB" ')}
 function frameSvg0(T0,live,S){const d=computeFrame(T0,live,S);
- return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.FW} 900"><defs><linearGradient id="${d.fx}cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient><radialGradient id="${d.fx}vg"><stop offset=".62" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></radialGradient>${d.cdefs}</defs><g transform="${d.camTfStr}">${d.kb?d.bg.replace('__KB__',d.kb):d.bg}${d.dyn}</g>${d.over}</svg>`}
+ return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.FW} 900"><defs><linearGradient id="${d.fx}cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient><radialGradient id="${d.fx}vg"><stop offset=".62" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></radialGradient>${d.cdefs}</defs><g transform="${d.bgTfStr}">${d.kb?d.bg.replace('__KB__',d.kb):d.bg}</g><g transform="${d.camTfStr}">${d.dyn}</g>${d.over}</svg>`}
 let PV_BG_VER=0,PV_EL=null,PV_BG_REF=null,PV_DEFS_STR='',PV_FW=0,PV_HOST=null;
 function resetStage(){PV_PH_VER=-1;PV_EL=null;PV_BG_REF=null;PV_DEFS_STR='';PV_FW=0;PV_HOST=null}
 function activeStageHost(){const tl=$('#timelineView');return(tl&&!tl.hidden)?$('#tlStage'):$('#pstage')}
 /* LIVE PREVIEW SPEED: a drawn set has many soft lights (blur filters); redrawing them on every frame while the camera moves made phones
    stutter. The live preview turns each scene's drawn set into one picture the first time it is shown (sharp at 2x), so a frame only moves
    a picture. Exported videos still draw the full set every frame. */
-const BG_BMP_SCALE=Math.min(2,Math.max(1.25,(window.devicePixelRatio||1)*.85));
+const BG_BMP_SCALE=Math.min(1.45,Math.max(1.25,(window.devicePixelRatio||1)*.85)); /* about 3 million pixels at most: a bigger picture made the phone stall for a moment at every scene change */
 const bgBmpTag=u=>`<image href="${u}" x="0" y="0" width="1600" height="900" preserveAspectRatio="none"/>`;
 let BG_BMP_N=0;
+/* The set is turned into one picture in SMALL PIECES: drawing a whole blurred, lit set in one go blocked a phone for a quarter to half a second, which
+   froze the picture while the voice played on (once at every scene change). Now it is drawn a strip at a time, each strip in its own quiet moment
+   between frames, and the finished picture is encoded off the main thread. */
+const BG_TILES_X=6,BG_TILES_Y=3;
+const idleSlice=f=>{if(typeof requestIdleCallback==='function')requestIdleCallback(f,{timeout:250});else setTimeout(f,16)};
 function rasterBg(sc,bg,bgEl){if(!sc||sc._bgBmpBusy||sc._bgBmp||/<image\b/i.test(bg)||typeof document==='undefined')return;sc._bgBmpBusy=true;
  try{const W=Math.round(1600*BG_BMP_SCALE),H=Math.round(900*BG_BMP_SCALE),src='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 1600 900">'+bg+'</svg>',
   u=URL.createObjectURL(new Blob([src],{type:'image/svg+xml'})),im=new Image();
-  im.onload=()=>{try{const c=document.createElement('canvas');c.width=W;c.height=H;c.getContext('2d').drawImage(im,0,0,W,H);URL.revokeObjectURL(u);
-   c.toBlob(b=>{sc._bgBmpBusy=false;if(!b)return;sc._bgBmp=URL.createObjectURL(b);if(++BG_BMP_N>80){BG_BMP_N=0}
-    if(PV_EL&&PV_BG_REF===sc&&bgEl&&bgEl.isConnected)bgEl.innerHTML=bgBmpTag(sc._bgBmp)},'image/png')}catch(e){sc._bgBmpBusy=false;sc._bgBmp=null}};
-  im.onerror=()=>{sc._bgBmpBusy=false;URL.revokeObjectURL(u)};im.src=u}catch(e){sc._bgBmpBusy=false}}
+  const fail=()=>{sc._bgBmpBusy=false;try{URL.revokeObjectURL(u)}catch(e){}};
+  im.onload=()=>{try{const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');let n=0;const N=BG_TILES_X*BG_TILES_Y,tw=Math.ceil(W/BG_TILES_X),th=Math.ceil(H/BG_TILES_Y);
+   const step=()=>{try{if(sc._bgEvicted){sc._bgEvicted=false;return fail()}
+     const tx=n%BG_TILES_X,ty=Math.floor(n/BG_TILES_X),x=tx*tw,y=ty*th,w=Math.min(tw,W-x),h=Math.min(th,H-y);
+     g.save();g.beginPath();g.rect(x,y,w,h);g.clip();g.drawImage(im,0,0,W,H);g.restore();
+     if(++n<N)return idleSlice(step);
+     URL.revokeObjectURL(u);
+     c.toBlob(b=>{sc._bgBmpBusy=false;if(!b)return;sc._bgBmp=URL.createObjectURL(b);if(++BG_BMP_N>80){BG_BMP_N=0}
+      if(PV_EL&&PV_BG_REF===sc&&bgEl&&bgEl.isConnected)bgEl.innerHTML=bgBmpTag(sc._bgBmp)},'image/png')}catch(e){fail();sc._bgBmp=null}};
+   idleSlice(step)}catch(e){fail();sc._bgBmp=null}};
+  im.onerror=fail;im.src=u}catch(e){sc._bgBmpBusy=false}}
 /* Update the live picture in place: when this frame has the same elements as the last one (the usual case: people and props only moved),
    only the changed attributes are written. Replacing everything each frame made the browser rebuild every person (hundreds of shared
    shapes each) from scratch, which is what made playback stutter on phones. */
@@ -4300,7 +4465,7 @@ function morphSvg(el,html){if(!el)return;if(el.__html===html)return;el.__html=ht
 function frame(){const host=activeStageHost();if(!host)return;const hfx=(host.id||'lv')+'_';PH_REF=true;let d;try{d=computeFrame(PL.T,true,PL,hfx)}finally{PH_REF=false}
  if(!PV_EL||PV_HOST!==host||!host.contains(PV_EL)||PV_FW!==d.FW){PV_FW=d.FW;PV_HOST=host;PV_BG_REF=null;PV_DEFS_STR='';
   const main=host.id==='pstage',clipOn=main&&vsClip(),par=main?' preserveAspectRatio="'+vsPar()+'"':'';
-  host.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.FW} 900"${par}><defs><linearGradient id="${hfx}cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient><radialGradient id="${hfx}vg"><stop offset=".62" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></radialGradient></defs><defs class="p-cdefs"></defs><defs class="p-phdefs"></defs>${clipOn?`<clipPath id="${hfx}wclip"><rect width="${d.FW}" height="900"/></clipPath><g clip-path="url(#${hfx}wclip)">`:''}<g class="p-cam"><g class="p-bg"></g><g class="p-dyn"></g></g><g class="p-over"></g>${clipOn?'</g>':''}</svg>`;
+  host.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.FW} 900"${par}><defs><linearGradient id="${hfx}cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient><radialGradient id="${hfx}vg"><stop offset=".62" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></radialGradient></defs><defs class="p-cdefs"></defs><defs class="p-phdefs"></defs>${clipOn?`<clipPath id="${hfx}wclip"><rect width="${d.FW}" height="900"/></clipPath><g clip-path="url(#${hfx}wclip)">`:''}<g class="p-bgcam"><g class="p-bg"></g></g><g class="p-cam"><g class="p-dyn"></g></g><g class="p-over"></g>${clipOn?'</g>':''}</svg>`;
   PV_EL=host.firstElementChild;
   /* the main stage takes the exported shape; its picture fills the stage box and the svg letterboxes (or crops) inside it */
   if(main&&!vsStd(VSET)){const e=PV_EL.style;e.position='absolute';e.inset='0';e.width='100%';e.height='100%'}}
@@ -4309,7 +4474,7 @@ function frame(){const host=activeStageHost();if(!host)return;const hfx=(host.id
  if(PV_BG_REF!==d.sc||PV_BG_VER!==d.phV){PV_BG_REF=d.sc;PV_BG_VER=d.phV;const bgEl=PV_EL.querySelector('.p-bg');
   if(!d.kb&&d.sc._bgBmp){bgEl.innerHTML=bgBmpTag(d.sc._bgBmp)}else{bgEl.innerHTML=d.kb?d.bg.replace('__KB__',d.kb):d.bg;if(!d.kb)rasterBg(d.sc,d.bg,bgEl)}}
   if(d.kb){const kbe=PV_EL.querySelector('.p-kb');if(kbe)kbe.setAttribute('transform',d.kb)}
- PV_EL.querySelector('.p-cam').setAttribute('transform',d.camTfStr);
+ PV_EL.querySelector('.p-bgcam').setAttribute('transform',d.bgTfStr);PV_EL.querySelector('.p-cam').setAttribute('transform',d.camTfStr);
  morphSvg(PV_EL.querySelector('.p-dyn'),d.dyn);
  morphSvg(PV_EL.querySelector('.p-over'),d.over);
  const sc=PL.SC[PL.i];$('#perr').textContent=PL.err?'⚠ '+(sc?sc.name:'')+': '+PL.err:''}
@@ -4427,7 +4592,24 @@ function ploop(ts){if(!PL){PLR=0;return}
   }
  }
  if(PL.dirty&&!document.hidden&&ts-PL.lr>Math.max(33,(PL.cost||0)*1.6)){PL.lr=ts;PL.dirty=false;qSample(ts);const c0=performance.now();frame();PL.cost=(PL.cost||0)*.8+(performance.now()-c0)*.2;pui()}
+ prewarmNext();
  PLR=requestAnimationFrame(ploop)}
+/* SMOOTH SCENE CHANGES: the first frame of a scene used to build its set, people and drawings from scratch (a visible hitch on phones).
+   While a scene plays, the next one is prepared in idle time: its people and shapes are built into the caches and its set is turned into
+   a picture, so the cut lands on a ready frame. Nothing is drawn on screen and the export is not touched. */
+/* WARM AHEAD AND LET GO: the next few scenes are prepared one at a time in idle moments (their people and shapes built, their set turned into one
+   picture), starting well before they are needed, so a scene change never has to do that work in the middle of a frame. Scenes far behind or far
+   ahead give their pictures back, so a 30 minute film never piles up hundreds of big bitmaps. */
+const WARM_AHEAD=3,WARM_BEHIND=1;
+function prewarmNext(){try{if(!PL||!PL.st||PL._pwBusy||!PL.SC||!PL.SC.length)return;const T=PL.T;let i=0;while(i<PL.SC.length-1&&T>=PL.st[i+1])i++;
+ if(PL._evI!==i){PL._evI=i;for(let k=0;k<PL.SC.length;k++){if(k>=i-WARM_BEHIND&&k<=i+WARM_AHEAD+1)continue;const q=PL.SC[k];if(q&&q._bgBmpBusy)q._bgEvicted=true;if(q&&(q._bgBmp||q._pw||q._bgL)){if(q._bgBmp){try{URL.revokeObjectURL(q._bgBmp)}catch(e){}}q._bgBmp=null;q._pw=0;q._bgL=null}}}
+ let j=-1;for(let k=i;k<=Math.min(PL.SC.length-1,i+WARM_AHEAD);k++){const q=PL.SC[k];if(q&&!q._pw){j=k;break}}
+ if(j<0)return;const sc=PL.SC[j];PL._pwBusy=true;
+ const go=()=>{try{if(!PL||PL.SC[j]!==sc)return;PH_REF=true;let d;try{d=computeFrame(PL.st[j]+.04,true,PL,'pw_')}finally{PH_REF=false}sc._pw=1;
+   /* the picture of the set is made in a second idle moment, so the two heavy steps never land in the same frame */
+   const ras=()=>{try{if(PL&&PL.SC[j]===sc&&d&&!d.kb&&d.sc===sc&&!sc._bgBmp)rasterBg(sc,d.bg,null)}catch(e){}};
+   if(typeof requestIdleCallback==='function')requestIdleCallback(ras,{timeout:1500});else setTimeout(ras,60)}catch(e){sc._pw=1}finally{if(PL)PL._pwBusy=false}};
+ if(typeof requestIdleCallback==='function')requestIdleCallback(go,{timeout:1200});else setTimeout(go,30)}catch(e){if(PL)PL._pwBusy=false}}
 /* ---- Processing overlay (shown while the voiceover is transcribed, timestamped and synced) ---- */
 const PROC={order:['read','transcribe','arrange','sync'],timer:0,hideT:0,mode:'audio'};
 const procTick=()=>new Promise(r=>setTimeout(r,40));
@@ -4531,8 +4713,10 @@ async function loadOwnAudioFiles(fileList){
   if(!PL)return;
   cancelPrecode();
   const syncMod=window.AnimatoSync;
-  let TranscriberMod=null;
-  if(aiOn){
+  /* the transcript of this exact voiceover is kept with the project, so reopening never transcribes it again */
+  const txSig=pmTxSig(files,decoded);let cachedTx=null;try{cachedTx=await pmTxLoad(txSig,files.length)}catch(e){}
+  let TranscriberMod=null,txResults=null;
+  if(aiOn&&!cachedTx){
    try{TranscriberMod=gh?await getGithubMod():await getTranscriberMod()}
    catch(e){if(!gh)throw e;ghErr='The transcriber could not load';aiWhy='github-fail'}
   }
@@ -4544,6 +4728,7 @@ async function loadOwnAudioFiles(fileList){
   let arrangedClipMatches=null;
 
   try{
+   if(cachedTx){txResults=cachedTx;procStep('transcribe','Using your saved transcript…',70)}else{
    if(!aiOn||!TranscriberMod)throw NO_AI;
    ttsStatus(gh?'transcribing your voiceover…':'transcribing audio with Moonshine AI…');
    procStep('transcribe',gh?'Sending your voiceover…':'Starting the transcriber…',18);
@@ -4561,7 +4746,7 @@ async function loadOwnAudioFiles(fileList){
     durationSec:decoded[idx].a.length/decoded[idx].rate,
     file:files[idx],
    }));
-   const txResults=await idle(tick=>TranscriberMod.transcribeClips(clipInputs,{
+   txResults=await idle(tick=>TranscriberMod.transcribeClips(clipInputs,{
     buildSpeechProfile:syncMod&&syncMod.buildSpeechProfile,
     onProgress:({clipIndex,clipCount,clipName,overallRatio,message})=>{
      if(prog)prog.value=0.32+0.52*overallRatio;
@@ -4570,6 +4755,8 @@ async function loadOwnAudioFiles(fileList){
      tick();
     },
    }),gh?300000:120000);
+   try{await pmTxSave(txSig,txResults)}catch(e){}
+   }
    if(!PL)return;
    const hasAnyWords=txResults.some(r=>r&&r.transcript&&Array.isArray(r.transcript.lines)&&r.transcript.lines.some(l=>l.text&&l.text.trim()));
    if(hasAnyWords&&AlignMod){
@@ -4595,6 +4782,7 @@ async function loadOwnAudioFiles(fileList){
   const targetRate=decoded[0].rate||24000;
   const gapSamples=files.length>1?Math.round(targetRate*0.12):0;
   const pcmClips=decoded.map(d=>resamplePcm(d.a,d.rate,targetRate));
+  const decodedSecs=decoded.map(d=>d.a.length/d.rate);
   const clipDurs=pcmClips.map((a,i)=>(a.length+(i<pcmClips.length-1?gapSamples:0))/targetRate);
   let combined;
   if(pcmClips.length===1){
@@ -4605,6 +4793,8 @@ async function loadOwnAudioFiles(fileList){
    let offset=0;
    pcmClips.forEach((a,i)=>{combined.set(a,offset);offset+=a.length;if(i<pcmClips.length-1)offset+=gapSamples});
   }
+  /* a long voiceover is huge in memory (30 minutes = hundreds of MB per copy): every copy but the one the player keeps is released now, so the phone is not squeezed while the film plays */
+  decoded.forEach(d=>{d.a=null});pcmClips.length=0;
   lastTtsPcm={a:combined,rate:targetRate};
   buildWave(combined);
   if(!lastNarration)lastNarration=PL.SC.map(s=>s.narration||s.captions.map(c=>c.text).join(' ')).filter(Boolean).join(' ')||'Custom voiceover';
@@ -4695,7 +4885,7 @@ async function loadOwnAudioFiles(fileList){
 
   PL.T=0;PL.playing=false;PL.dirty=true;
   if(typeof syncPlayerVoScript==='function')syncPlayerVoScript({SC:PL.SC,narration:lastNarration,ownAudio:PL.ownAudio});
-  renderAudioClipList(listEl,files,decoded.map(d=>d.a.length/d.rate),arrangedClipMatches);
+  renderAudioClipList(listEl,files,decodedSecs,arrangedClipMatches);
   if($('#ttsDownload'))$('#ttsDownload').disabled=false;
   if(prog)prog.value=1;
   const usedAI=!!orderedTranscripts;
@@ -4754,7 +4944,7 @@ function openPlayerNow(r){if(window.__animatoGuard&&!window.__animatoGuard()){co
  if($('#ttsProgress')){$('#ttsProgress').hidden=true;$('#ttsProgress').value=0}
  if($('#vbadge'))$('#vbadge').textContent='Own voiceover mode';
  const Gen=window.AnimatoGen,srcCode=r.sourceCode||'';
- PL={SC:r.SC,total,st:starts(r.SC),syncedCaptions:null,speechCurves:null,chunkAnchors:null,timeWarps:null,actionCues:null,matchReport:null,sync:false,wait:false,T:0,playing:!pendingAudio.length&&!lastNarration,ownAudio:true,last:performance.now(),lr:0,dirty:true,err:'',i:0,cost:0,ar:r.ar||'16:9',style:r.style||'',fileAr:r.ar||'16:9',fromFile:true,reframe:false,TH:r.TH||null,thMode:r.TH?'ai':'none',thT:0,repairs:r.repairs||[],batchInfo:r.batchInfo||null,execEnv:r.execEnv||null,sourceCode:srcCode,sceneBlocks:(Gen&&typeof Gen.extractSceneBlocks==='function')?Gen.extractSceneBlocks(srcCode):[],editHistory:[],tlSelected:-1};setAspect(r.ar||'16:9');fmtNote();thumbInit();
+ PL={SC:r.SC,total,st:starts(r.SC),syncedCaptions:null,speechCurves:null,chunkAnchors:null,timeWarps:null,actionCues:null,matchReport:null,sync:false,wait:false,T:0,playing:!pendingAudio.length&&!lastNarration,ownAudio:true,last:performance.now(),lr:0,dirty:true,err:'',i:0,cost:0,ar:r.ar||'16:9',style:r.style||'',fileAr:r.ar||'16:9',fromFile:true,reframe:false,TH:r.TH||null,thMode:r.TH?'ai':'none',thT:0,repairs:r.repairs||[],engage:r.engage||null,batchInfo:r.batchInfo||null,execEnv:r.execEnv||null,sourceCode:srcCode,sceneBlocks:(Gen&&typeof Gen.extractSceneBlocks==='function')?Gen.extractSceneBlocks(srcCode):[],editHistory:[],tlSelected:-1};setAspect(r.ar||'16:9');fmtNote();thumbInit();
  $('#ptitle').textContent=r.title;$('#scrub').max=total;$('#chips').innerHTML='';
  if(typeof syncPlayerVoScript==='function')syncPlayerVoScript(r);
  r.SC.forEach(s=>{const b=document.createElement('button');b.textContent=s.name;$('#chips').append(b)});seekChips();
@@ -4770,14 +4960,24 @@ function setAspect(ar){ar=ar==='9:16'?'9:16':'16:9';const A=ARS[ar];FMT=A;
  if(PL){PL.ar=ar;PL.reframe=false;PL.dirty=true}
  const tp=$('#thumbPanel');if(tp)tp.hidden=ar==='9:16';
  vsUseAspect(ar)}
-function repairReport(){const box=$('#repairBox');if(!box)return;const rp=(PL&&PL.repairs)||[];
+/* improvements the app made on purpose (camera, acting, engagement) are not "problems": they are listed apart, under the energy meter */
+const IMPROVE_RE=/^(Engagement:|The director added|Added \d+ body action)/;
+function repairReport(){const box=$('#repairBox');if(!box)return;const all=(PL&&PL.repairs)||[],rp=all.filter(m=>!IMPROVE_RE.test(String(m)));
+ engageReport(all.filter(m=>IMPROVE_RE.test(String(m))));
  if(!rp.length){box.hidden=true;return}
  box.hidden=false;$('#repairSum').textContent='⚠ Your file had '+rp.length+' problem'+(rp.length>1?'s':'')+' that '+(rp.length>1?'were':'was')+' repaired. Your video is complete. Tap to see what was fixed.';
  $('#repairList').innerHTML=rp.map(m=>'<li>'+esc(String(m))+'</li>').join('')}
+/* VISUAL ENERGY: how much changes on screen, 5 seconds per bar (the retention curve viewers feel), and what the app added to keep it high */
+function engageReport(notes){let el=$('#engageBox');const eg=PL&&PL.engage;if(!eg){if(el)el.hidden=true;return}
+ if(!el){el=document.createElement('details');el.id='engageBox';el.className='repairbox engagebox';const rb=$('#repairBox');if(rb&&rb.parentNode)rb.parentNode.insertBefore(el,rb);else return}
+ el.hidden=false;const c=eg.curve||[],mx=Math.max(3,...c),col=v=>v>=2?'#4ade80':v>=1?'#facc15':'#f87171';
+ const bars=c.slice(0,120).map((v,i)=>'<i title="'+(i*5)+'-'+(i*5+5)+' s" style="display:inline-block;width:'+Math.max(3,Math.min(10,Math.floor(300/Math.max(1,c.length))))+'px;height:'+Math.round(6+22*Math.min(1,v/mx))+'px;margin-right:1px;border-radius:2px;background:'+col(v)+';vertical-align:bottom"></i>').join('');
+ const up=eg.score>eg.before?' (your file alone: '+eg.before+')':'';
+ el.innerHTML='<summary>⚡ Visual energy '+eg.score+'/100'+up+'. Tap to see what keeps viewers watching.</summary><div style="margin:8px 0 4px;line-height:0">'+bars+'</div><small class="muted">Each bar is 5 seconds: green = something new every 2 to 3 s, red = a quiet stretch.</small><ul>'+(notes||[]).map(m=>'<li>'+esc(String(m))+'</li>').join('')+'</ul>'}
 function fmtNote(){if(!PL)return;repairReport();
  const bi=PL.batchInfo;
  const bTxt=bi&&bi.count>1?(bi.count+' batch files · '+PL.SC.length+' scenes · '+fmt(PL.total)):(PL.SC.length+' scenes · '+fmt(PL.total));
- const rep=(PL.repairs&&PL.repairs.length)?' · Repaired: '+PL.repairs.slice(0,3).join(', ')+(PL.repairs.length>3?', …':''):'';
+ const rpx=(PL.repairs||[]).filter(m=>!IMPROVE_RE.test(String(m))),rep=rpx.length?' · Repaired: '+rpx.slice(0,3).join(', ')+(rpx.length>3?', …':''):'';
  const warn=(bi&&bi.warnings&&bi.warnings.length)?' · ⚠ '+bi.warnings.map(w=>String(w).replace(/\.+$/,'')).join(' · '):'';
  $('#fmtnote').textContent=(PL&&PL.ar==='9:16'?'TikTok 9:16':'YouTube 16:9')+' scene · exports at '+VSET.width+'×'+VSET.height+' · '+VSET.fps+' fps · '+bTxt+rep+warn}
 function initFormat(){}
@@ -4807,6 +5007,28 @@ async function thDownload(type){const o=thSt();if(!o)return;const b=type==='jpg'
 function initThumb(){$('#thJpg').onclick=()=>thDownload('jpg');$('#thPng').onclick=()=>thDownload('png');
  $('#thFrame').onclick=()=>{if(!PL)return;PL.thMode='frame';PL.thT=PL.T;thumbRender()}}
 const STAGED_IMPORT={parsed:null,audioFiles:[]};
+const IMP_ENTRIES=[];
+/* A part with the same number REPLACES the one already loaded (a fixed re-upload), except a CONTINUATION: the AI ran out of room in the middle of a
+   part and, after "continue", went on in a new block with the same part line. That block has no movie() and no CAST lines, or it arrives in the
+   same paste as the start of its part: it is ADDED after it, so no beat is lost. */
+function impAdd(list){const now=new Set();for(const e of list){const sc=window.AnimatoParts?window.AnimatoParts.scanBatches([e.text]):{have:[]};const key=sc.have.length===1?'b'+sc.have[0]:null;
+ const cont=!!key&&IMP_ENTRIES.some(x=>x.key===key||(x.key||'').indexOf(key+'+')===0)&&(now.has(key)||!/\bCAST\.\w+\s*=|\bmovie\s*\(/.test(e.text));
+ if(cont){IMP_ENTRIES.push({name:e.name,text:e.text,key:key+'+'+IMP_ENTRIES.length});continue}
+ const i=key?IMP_ENTRIES.findIndex(x=>x.key===key):IMP_ENTRIES.findIndex(x=>x.text===e.text);if(i>=0){IMP_ENTRIES[i]={name:e.name,text:e.text,key};for(let j=IMP_ENTRIES.length-1;j>=0;j--)if((IMP_ENTRIES[j].key||'').indexOf(key+'+')===0)IMP_ENTRIES.splice(j,1)}else IMP_ENTRIES.push({name:e.name,text:e.text,key});if(key)now.add(key)}}
+function expectSec(){let s=+window.__EXPECT_SEC||0;if(!s){try{const o=JSON.parse(localStorage.getItem('animato_expect_sec')||'null');if(o&&Date.now()-o.t<2*864e5)s=+o.s||0}catch(e){}}return s}
+function renderPartsCheck(r){const box=$('#partsCheck'),P=window.AnimatoParts;if(!box)return;
+ if(!P||!r||!r.SC||!r.SC.length){box.hidden=true;return}
+ const loaded=r.SC.reduce((a,s)=>a+s.duration,0),res=P.checkParts({texts:IMP_ENTRIES.map(e=>e.text),expectedSec:expectSec(),loadedSec:loaded});
+ STAGED_IMPORT.partsStatus=res.status;
+ if(res.status==='unknown'){box.hidden=true;return}
+ box.hidden=false;box.dataset.s=res.status;
+ $('#pcHead').textContent=(res.status==='ok'?'✓ ':'⚠ ')+P.partsHeadline(res);
+ $('#pcChips').innerHTML=Array.from({length:res.total},(_,i)=>{const k=i+1,ok=res.have.includes(k);return'<span class="pc-chip'+(ok?'':' miss')+'">Part '+k+(ok?' ✓':' ✗')+'</span>'}).join('');
+ const ok=res.status==='ok',msg=$('#pcMsg');
+ $('#pcText').textContent=ok?'Everything is here. Add your voiceover below, or tap Open in Player.':res.status==='thin'?'You can open it as it is. If you want the full length, copy the message below, paste it into the same AI chat, and add the new parts here (they replace the old ones).':'The AI stopped before the end. 1) Copy the message below. 2) Paste it into the SAME chat with your AI. 3) When it answers, choose the new file(s) here again or paste the new part(s): we add them to the parts you already have.';
+ msg.hidden=ok;msg.value=ok?'':P.continueMessage(res);
+ $('#pcCopy').hidden=ok;$('#pcHow').textContent=ok?'':'Tip: the message tells the AI exactly where to carry on, so you never have to say "next".'}
+
 function renderImportAudioState(){
  const files=orderAudioFiles(STAGED_IMPORT.audioFiles);
  STAGED_IMPORT.audioFiles=files;
@@ -4861,7 +5083,7 @@ function clearImportAudioFiles(){
  if($('#importAudioErr'))$('#importAudioErr').textContent='';
  renderImportAudioState()}
 function resetStagedImport(){
- STAGED_IMPORT.parsed=null;STAGED_IMPORT.audioFiles=[];
+ STAGED_IMPORT.parsed=null;STAGED_IMPORT.audioFiles=[];IMP_ENTRIES.length=0;if($('#partsCheck'))$('#partsCheck').hidden=true;
  if($('#herr'))$('#herr').textContent='';
  if($('#importAudioErr'))$('#importAudioErr').textContent='';
  if($('#importAudioFile'))$('#importAudioFile').value='';
@@ -4911,6 +5133,7 @@ function startMergedResult(merged,rawFallback,{autoOpen=false}={}){
   }
  }
  r.batchInfo={count:(merged.orderedBatches||[]).length,batches:merged.orderedBatches||[],warnings:merged.warnings||[]};
+ try{renderPartsCheck(r)}catch(e){}
  if(infoBox){
   const seq=(merged.orderedBatches||[]).map(b=>{
    const bLbl=b.batchNumber!=null?('Batch '+b.batchNumber+(b.totalBatches?'/'+b.totalBatches:'')):(merged.isMultiBatch?'Batch':'File');
@@ -4951,7 +5174,17 @@ function tlRenderStrip(){const strip=$('#tlStrip');if(!strip||!PL)return;const g
   strip.append(btn);
  });
  tlRenderThumbs(genToken)}
-function tlRenderThumbs(genToken){if(!PL||genToken!==TL_THUMBS_GEN)return;const clips=[...document.querySelectorAll('#tlStrip .tl-clip')];if(!clips.length)return;
+/* Timeline thumbnails are small pictures, not live drawings: a 10-minute film has 100+ scenes, and 100+ full scene drawings in the page
+   made the timeline heavy to scroll on phones. Each thumbnail is drawn once into a small JPEG (the full drawing is kept only if the picture
+   cannot be made, e.g. a scene with a found photo). */
+let TL_THUMB_URLS=[];
+function thumbInto(box,svg,gen){const W=box.clientWidth>0?Math.min(320,Math.round(box.clientWidth*Math.min(2,window.devicePixelRatio||1))):240,vb=/viewBox="0 0 (\d+) 900"/.exec(svg),fw=vb?+vb[1]:1600,H=Math.round(W*900/fw);
+ if(/<image\b/i.test(svg)||typeof document==='undefined'){box.innerHTML=svg;return}
+ let u='';try{u=URL.createObjectURL(new Blob([svg.replace('<svg ','<svg width="'+W+'" height="'+H+'" ')],{type:'image/svg+xml'}))}catch(e){box.innerHTML=svg;return}
+ const im=new Image();im.onload=()=>{try{URL.revokeObjectURL(u);if(gen!==TL_THUMBS_GEN||!box.isConnected)return;const c=document.createElement('canvas');c.width=W;c.height=H;c.getContext('2d').drawImage(im,0,0,W,H);
+   c.toBlob(b=>{if(!b||gen!==TL_THUMBS_GEN||!box.isConnected){if(!b)box.innerHTML=svg;return}const v=URL.createObjectURL(b);TL_THUMB_URLS.push(v);box.innerHTML='<img alt="" decoding="async" style="width:100%;height:100%;object-fit:cover;display:block" src="'+v+'">'},'image/jpeg',.82)}catch(e){box.innerHTML=svg}};
+ im.onerror=()=>{try{URL.revokeObjectURL(u)}catch(e){}box.innerHTML=svg};im.src=u}
+function tlRenderThumbs(genToken){if(TL_THUMB_URLS.length){const old=TL_THUMB_URLS;TL_THUMB_URLS=[];setTimeout(()=>old.forEach(x=>{try{URL.revokeObjectURL(x)}catch(e){}}),3000)}if(!PL||genToken!==TL_THUMBS_GEN)return;const clips=[...document.querySelectorAll('#tlStrip .tl-clip')];if(!clips.length)return;
  const order=[];const anchor=PL.tlSelected>=0?PL.tlSelected:(PL.i||0);
  for(let d=0;d<clips.length;d++){
   if(anchor+d<clips.length)order.push(anchor+d);
@@ -4967,7 +5200,7 @@ function tlRenderThumbs(genToken){if(!PL||genToken!==TL_THUMBS_GEN)return;const 
    const box=clip.querySelector('.tl-thumb');if(!box)continue;
    const st=PL.st[idx]||0,ed=(PL.st[idx+1]!=null?PL.st[idx+1]:PL.total),midT=st+Math.min(Math.max(.2,(ed-st)*.45),Math.max(.1,ed-st-.05));
    const keep=PL.err;
-   try{box.innerHTML=frameSvg(midT,false,PL)}catch(e){box.innerHTML=`<span class="tl-thumb-ph">S${idx+1}</span>`}
+   try{thumbInto(box,frameSvg(midT,false,PL),genToken)}catch(e){box.innerHTML=`<span class="tl-thumb-ph">S${idx+1}</span>`}
    PL.err=keep;
   }
   if(cursor<order.length)requestAnimationFrame(step);
@@ -5281,11 +5514,10 @@ function initApp(){recoverFromCrash();if(!RENDER_MODE)initGhRender();initAiSync(
   if(txtFiles.length+zipEntries.length>40){$('#herr').textContent='⚠ You can upload up to 40 batch TXT/JS files at once (selected '+(txtFiles.length+zipEntries.length)+').';return}
   try{
    const Gen=await getGenMod();
-   const entries=(await Promise.all(txtFiles.map(async f=>({name:f.name||'scene.txt',text:await f.text()})))).concat(zipEntries);
-   if(entries.length===1){
-    const chunks=Gen.splitConcatenatedBatches(entries[0].text);
-    if(chunks){startMergedResult(Gen.mergeUploadedBatchFiles(chunks),entries[0].text,{autoOpen:false});return}
-   }
+   const fresh=(await Promise.all(txtFiles.map(async f=>({name:f.name||'scene.txt',text:await f.text()})))).concat(zipEntries);
+   const expanded=[];for(const e of fresh){const ch=Gen.splitConcatenatedBatches(e.text);if(ch)expanded.push(...ch);else expanded.push(e)}
+   impAdd(expanded);   /* files you add later are ADDED to the ones you already loaded (a missing part can be added on its own) */
+   const entries=IMP_ENTRIES.map(({name,text})=>({name,text}));
    const merged=Gen.mergeUploadedBatchFiles(entries);
    startMergedResult(merged,entries[0].text,{autoOpen:false});
   }catch(err){$('#herr').textContent='⚠ Could not read the file(s): '+err.message}
@@ -5312,10 +5544,14 @@ function initApp(){recoverFromCrash();if(!RENDER_MODE)initGhRender();initAiSync(
   if(!raw.trim()){startCode('');return}
   const Gen=await getGenMod();
   const chunks=Gen.splitConcatenatedBatches(raw);
-  if(chunks){startMergedResult(Gen.mergeUploadedBatchFiles(chunks),raw,{autoOpen:true});return}
+  if(chunks){impAdd(chunks);const ents=IMP_ENTRIES.map(({name,text})=>({name,text})),chk=window.AnimatoParts.checkParts({texts:ents.map(e=>e.text),expectedSec:expectSec()});startMergedResult(Gen.mergeUploadedBatchFiles(ents),raw,{autoOpen:chk.status==='ok'});return}
   if($('#importOrderInfo'))$('#importOrderInfo').hidden=true;
   startCode(raw);
  };
+ {const pc=$('#pcCopy'),pk=$('#pcClear'),pi=$('#pcIgnore');
+  if(pc)pc.onclick=async()=>{const m=$('#pcMsg');try{await navigator.clipboard.writeText(m.value);pc.textContent='Copied ✓ Now paste it into your AI'}catch(e){m.select();try{document.execCommand('copy');pc.textContent='Copied ✓ Now paste it into your AI'}catch(e2){pc.textContent='Select the text above and copy it'}}setTimeout(()=>{pc.textContent='Copy this message for your AI'},4000)};
+  if(pk)pk.onclick=()=>{resetStagedImport();if($('#paste'))$('#paste').value=''};
+  if(pi)pi.onclick=()=>{window.__EXPECT_SEC=0;try{localStorage.removeItem('animato_expect_sec')}catch(e){}if(STAGED_IMPORT.parsed)renderPartsCheck(STAGED_IMPORT.parsed)}}
  $('#dp').onclick=()=>{const p=buildCompletedPrompt();$('#prompt').textContent=p;const u=URL.createObjectURL(new Blob([p],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=u;a.download='animato-scene-prompt.txt';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);if(myBgOn()){$('#formStatus').textContent='Prompt downloaded. Preparing your background sheet…';bgDownloadSheets().then(n=>{$('#formStatus').textContent='Prompt'+(n?' and background sheet'+(n>1?'s':''):'')+' downloaded. Give '+(n?'everything':'the prompt')+' to your AI model.'})}else $('#formStatus').textContent='Prompt downloaded. Send the TXT contents to your AI model.'};
  $('#demo').onclick=()=>startCode(EXAMPLE,{noVoice:true});
  $('#tolab').onclick=()=>{show('lab');POSE={...DEF};render()};
@@ -5630,7 +5866,7 @@ async function ghSafe(v){if(v instanceof Blob)return{__b:await ghBlobToUrl(v)};i
 async function ghRevive(v){if(Array.isArray(v)){const o=[];for(const x of v)o.push(await ghRevive(x));return o}
  if(v&&typeof v==='object'){if(typeof v.__b==='string')return await (await fetch(v.__b)).blob();const o={};for(const k of Object.keys(v))o[k]=await ghRevive(v[k]);return o}return v}
 if(RENDER_MODE){
- let RS=null,RC=null;
+ let RS=null,RC=null,RLAST='',RLASTD='';
  window.__AnimatoRender={
   async load(job){
    for(let i=0;i<400&&!(window.AnimatoAlive&&window.AnimatoPM&&window.AnimatoMyBg);i++)await new Promise(r=>setTimeout(r,50));
@@ -5647,9 +5883,11 @@ if(RENDER_MODE){
    RC=document.createElement('canvas');RC.width=job.W;RC.height=job.H;
    return{frames:Math.ceil(RS.total*RS.FPS),fps:RS.FPS,W:RS.W,H:RS.H,total:RS.total}},
   async frame(i){
-   const im=await svgToImg(exportSvg(RS,Math.min(RS.total-.001,i/RS.FPS))),g=RC.getContext('2d');
+   const svg=exportSvg(RS,Math.min(RS.total-.001,i/RS.FPS));
+   if(svg===RLAST&&RLASTD)return RLASTD;                /* a picture that did not change (a still moment) is not drawn again */
+   const im=await svgToImg(svg),g=RC.getContext('2d');
    g.fillStyle='#000';g.fillRect(0,0,RC.width,RC.height);g.drawImage(im,0,0,RC.width,RC.height);
-   return RC.toDataURL('image/jpeg',.92)}}}
+   RLAST=svg;RLASTD=RC.toDataURL('image/jpeg',.9);return RLASTD}}}
 let GHM=null;const ghMods=async()=>GHM||(GHM={a:await import('/gh-render.js'),p:await import('/gh-render-pipeline.js')});
 const GH_TOK='stk_gh_token',GH_JOB='stk_gh_job',GH_USE='stk_gh_usage',GH_REPO='stk_gh_repo';
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:v}catch(e){return d}},lsSet=(k,v)=>{try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v)}catch(e){}};
@@ -5686,7 +5924,7 @@ async function ghEnsureRepo(api,M,user){
  const app=await ghFetchApp(),have=await api.fileText(user.login,name,'app/.version',main);
  if(have!==app.version){ghUI('Copying the video engine to your repo…',.15);
   const files=app.files.map(f=>({path:f.path,b64:M.a.toB64(f.u)}));files.push({path:'app/.version',b64:M.a.textToB64(app.version)});
-  for(let i=0;i<files.length;i+=15)await api.pushFiles(user.login,name,main,files.slice(i,i+15),'Update the video engine',{fromBranch:main})}
+  await api.pushFiles(user.login,name,main,files,'Update the video engine',{fromBranch:main,onFile:(i,n)=>ghUI('Copying the video engine… '+(i+1)+'/'+n,.15+.08*i/n)})}
  return{name,main}}
 function ghAsk(M){return new Promise(res=>{const o=$('#ghConfirm');if(!o){res(true);return}
  $('#ghcMax').textContent=Math.round(M.a.CAPS.maxSeconds/60);$('#ghcDay').textContent=M.a.CAPS.perDay;o.hidden=false;
@@ -5714,10 +5952,10 @@ async function ghStart(){
    sel:SELECTED_CHARACTER,pack:SELECTED_CHARACTER==='custom'&&pk?await ghSafe(pk):null,bgs:await ghSafe(bgs),audio,seconds:sec});
   const key=M.a.newKey(),enc=new TextEncoder();
   const files=[{path:'job/meta.json',b64:M.a.textToB64(JSON.stringify({seconds:job.seconds,parts:job.parts}))},{path:'job/job.enc',b64:M.a.toB64(await M.a.encryptBytes(enc.encode(JSON.stringify(job)),key))}];
-  await api.pushFiles(user.login,name,M.a.branchOf(id),files,'Job '+id,{fromBranch:main});
-  for(let i=0;i<pieces.length;i++){ghUI('Sending the voiceover '+(i+1)+'/'+pieces.length+'…',.3+.2*i/pieces.length);
-   await api.pushFiles(user.login,name,M.a.branchOf(id),[{path:'job/audio-'+String(i).padStart(3,'0')+'.enc',b64:M.a.toB64(await M.a.encryptBytes(pieces[i],key))}],'Voiceover '+i)}
+  for(let i=0;i<pieces.length;i++)files.push({path:'job/audio-'+String(i).padStart(3,'0')+'.enc',b64:M.a.toB64(await M.a.encryptBytes(pieces[i],key))});
+  await api.pushFiles(user.login,name,M.a.branchOf(id),files,'Job '+id,{fromBranch:main,onFile:(i,n)=>ghUI('Sending your video… '+(i+1)+'/'+n,.3+.25*i/n)});
   ghUI('Starting the render…',.55);
+  if((await api.activeRuns(user.login,name)).length){await api.deleteBranch(user.login,name,M.a.branchOf(id));throw new Error('A render is already running on your GitHub. Wait for it to finish, then try again.')}
   await api.dispatch(user.login,name,main,{job:id,key});
   lsSet(GH_USE,JSON.stringify(M.a.recordUse(use,sec)));
   const st={id,owner:user.login,repo:name,sec,runId:0,t:Date.now(),key};lsSet(GH_JOB,JSON.stringify(st));
@@ -5743,7 +5981,7 @@ async function ghWatch(api,M,st){
   GHV={blob:new Blob([plain],{type:'video/mp4'}),name:(expName()||'video')+'-'+EXP.W+'x'+EXP.H+'-'+EXP.FPS+'fps.mp4',state:'done',saved:false};
   await api.deleteArtifact(st.owner,st.repo,art.id);await api.deleteBranch(st.owner,st.repo,M.a.branchOf(st.id));await api.deleteRun(st.owner,st.repo,st.runId);
   lsSet(GH_JOB,null);GHBUSY=false;ghUI('Ready. It has been removed from GitHub. Tap to save it.',null)
- }catch(e){GHBUSY=false;ghUI('GitHub render stopped: '+(e&&e.message||e));if(/did not finish/.test(e&&e.message||''))lsSet(GH_JOB,null)}}
+ }catch(e){GHBUSY=false;ghUI('GitHub render stopped: '+(e&&e.message||e));if(/did not finish|did not start/.test(e&&e.message||'')){lsSet(GH_JOB,null);try{await api.deleteBranch(st.owner,st.repo,M.a.branchOf(st.id))}catch(x){}}}}
 async function ghResume(){const raw=lsGet(GH_JOB,'');if(!raw)return;let st;try{st=JSON.parse(raw)}catch(e){lsSet(GH_JOB,null);return}
  if(Date.now()-st.t>36e5*30){lsSet(GH_JOB,null);return}
  const tok=lsGet(GH_TOK,'');if(!tok)return;const M=await ghMods();ghWatch(new M.a.GhApi(tok),M,st)}
@@ -6005,6 +6243,19 @@ function pmCapture(){
  PMCUR.meta.type=CTYPE;
  if(!PMCUR.named){const n=PM.autoName(st.form);if(n)PMCUR.name=n}
  return true}
+/* A small picture of what is on the player's canvas, kept with the project so the list shows which video is which. */
+let PMSNAPPING=false;
+async function pmSnap(){
+ if(PMSNAPPING||!PMCUR||!PL||!PL.sourceCode||PMRESTORING||typeof exportSvg!=='function')return;PMSNAPPING=true;
+ try{
+  const port=(PL.ar||'16:9')==='9:16',W=port?180:320,H=port?320:180,tot=PL.total||0;
+  const T=Math.max(0,Math.min(tot-.05,(PL.T||0)>.4?PL.T:Math.min(1.6,tot*.3)));
+  const S={SC:PL.SC,st:(PL.st||[]).slice(),syncedCaptions:PL.syncedCaptions||null,speechCurves:PL.speechCurves||null,timeWarps:PL.timeWarps||null,actionCues:PL.actionCues||null,total:tot,sync:PL.sync,wait:false,ar:PL.ar||'16:9',reframe:false,style:PL.style,W,H,FPS:30,par:'xMidYMid meet',clip:false};
+  const keep=PL.err,svg=exportSvg(S,T);PL.err=keep;
+  const im=await svgToImg(svg),c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');g.fillStyle='#000';g.fillRect(0,0,W,H);g.drawImage(im,0,0,W,H);
+  const u=c.toDataURL('image/jpeg',.72);
+  if(PMCUR&&u&&u.length>500&&u.length<90000){PMCUR.meta.thumb=u}
+ }catch(e){}finally{PMSNAPPING=false}}
 async function pmSaveNow(){
  clearTimeout(PMTIMER);if(!pmCapture()||!PM.hasContent(PMCUR))return;
  const sig=JSON.stringify([PMCUR.name,PMCUR.state,PMCUR.meta])+PMAUDIO.length;
@@ -6021,7 +6272,7 @@ function pmRender(){
  pmEl('pmSaved').hidden=!list.length;pmEl('pmNew').hidden=!list.length;
  if(!list.length){body.innerHTML='<div class="pm-empty"><div class="pm-big" data-pm="new" role="button" tabindex="0" aria-label="New project">+</div><h2>Start your first project</h2><p>Tap the plus to make a new Code to Stickman video. Everything is saved automatically, so you never lose your work.</p></div>';return}
  body.innerHTML=list.map(p=>{const s=PM.summarize(p),lk=PM_LOOK[s.hasVideo||p.meta.type?(p.meta.type||'draft'):'draft']||PM_LOOK.draft;
-  return '<div class="pm-row" data-pm-open="'+p.id+'" style="--c1:'+lk[1]+';--c2:'+lk[2]+'"><div class="pm-th">'+lk[0]+'</div><div class="pm-t"><b>'+esc(p.name)+'</b><small><span class="pm-tag">'+esc(s.typeName)+'</span><span class="pm-tag">'+s.ar+'</span>'+(s.scenes?s.scenes+' scenes · ':'')+PM.relTime(p.at)+'</small>'+(PMRECOVER===p.id?'<small class="pm-rec">● Recovered after reload</small>':'')+'</div><button type="button" class="pm-dots" data-pm-menu="'+p.id+'" aria-label="Project options">⋮</button>'+(PMMENU===p.id?'<div class="pm-menu"><button type="button" data-pm-ren="'+p.id+'">✎ Rename</button><button type="button" class="pm-del" data-pm-del="'+p.id+'">🗑 Delete</button></div>':'')+'</div>'}).join('')}
+  return '<div class="pm-row" data-pm-open="'+p.id+'" style="--c1:'+lk[1]+';--c2:'+lk[2]+'"><div class="pm-th'+(p.meta.thumb?' pm-img':'')+'"'+(p.meta.thumb?' style="background-image:url(\''+p.meta.thumb+'\')" role="img" aria-label="Preview of '+esc(p.name)+'"':'')+'>'+(p.meta.thumb?'':lk[0])+'</div><div class="pm-t"><b>'+esc(p.name)+'</b><small><span class="pm-tag">'+esc(s.typeName)+'</span><span class="pm-tag">'+s.ar+'</span>'+(s.scenes?s.scenes+' scenes · ':'')+PM.relTime(p.at)+'</small>'+(PMRECOVER===p.id?'<small class="pm-rec">● Recovered after reload</small>':'')+'</div><button type="button" class="pm-dots" data-pm-menu="'+p.id+'" aria-label="Project options">⋮</button>'+(PMMENU===p.id?'<div class="pm-menu"><button type="button" data-pm-ren="'+p.id+'">✎ Rename</button><button type="button" class="pm-del" data-pm-del="'+p.id+'">🗑 Delete</button></div>':'')+'</div>'}).join('')}
 function pmSheetHtml(){const sh=PMSHEET,el=pmEl('pmSheet');if(!el)return;
  if(!sh){el.innerHTML='';return}
  el.innerHTML=sh.k==='ren'?'<div class="pm-scrim"><div class="pm-sheet"><h3>Rename project</h3><input id="pmRn" maxlength="'+PM.MAX_NAME+'" value="'+esc(sh.name).replace(/"/g,'&quot;')+'"><div class="pm-btns"><button type="button" data-pm-cancel>Cancel</button><button type="button" class="pm-go" data-pm-save="'+sh.id+'">Save</button></div></div></div>'
@@ -6041,10 +6292,21 @@ function pmEnter(rec,audio){
   if(st.view==='wizard'&&st.wiz>0)wizGo(Math.min(st.wiz,WSTEPS.length-1));
   else if(st.view==='pro'&&st.pro>0)proGo(st.pro);
  }finally{PMRESTORING=false}}
+/* TRANSCRIPT KEPT WITH THE PROJECT: the words and their times are saved the moment the transcriber finishes (record 'tx:'+id), keyed by a fingerprint of the
+   decoded voiceover. Reopening the project finds it and goes straight on to arranging and syncing: no second transcription, however the app was left. */
+function pmTxSig(files,decoded){let h=2166136261>>>0;const mix=v=>{h^=(v&0xffff);h=Math.imul(h,16777619)>>>0};
+ mix(decoded.length);decoded.forEach(d=>{const a=d.a,n=a.length,st=Math.max(1,Math.floor(n/4000));mix(n);mix(n>>>16);mix(Math.round(d.rate||0));for(let k=0;k<n;k+=st)mix(((a[k]||0)*32767)|0)});
+ return decoded.length+'-'+h.toString(36)}
+async function pmTxLoad(sig,n){if(!PMCUR||!PMS)return null;const r=await PMS.get(PM.TX_PREFIX+PMCUR.id);
+ return r&&r.sig===sig&&Array.isArray(r.results)&&r.results.length===n&&r.results.every(x=>x&&x.transcript)?r.results:null}
+async function pmTxSave(sig,results){if(!PMCUR||!PMS||!Array.isArray(results)||!results.length)return;
+ await PMS.put({id:PM.TX_PREFIX+PMCUR.id,sig,results,at:Date.now()});
+ /* and the project itself (video + voiceover clips) straight away, not after the usual short wait */
+ try{PMSIG='';await pmSaveNow()}catch(e){}}
 async function pmOpen(id){const rec=PMLIST.find(x=>x.id===id)||await PMS.get(id);if(!rec)return;const a=await PMS.get(PM.AUDIO_PREFIX+id);
  pmEnter(rec,(a&&a.audio||[]).map(x=>x.blob instanceof File?x.blob:new File([x.blob],x.name,{type:x.type})))}
 function pmNew(){const rec=PM.newProject();rec.state.form=Object.assign({},PMDEFAULTS.form);rec.state.sel=Object.assign({},PMDEFAULTS.sel);pmEnter(rec,[])}
-function pmShowList(){clearTimeout(PMTIMER);PMRECOVER=null;pmSaveNow().then(()=>{try{localStorage.removeItem('stk_pm_active')}catch(e){}PMCUR=null;PMMENU=null;pmLeaveVideo();show('projects');pmRender()})}
+function pmShowList(){clearTimeout(PMTIMER);PMRECOVER=null;(PMCUR&&PL&&PL.sourceCode?pmSnap():Promise.resolve()).then(()=>pmSaveNow()).then(()=>{try{localStorage.removeItem('stk_pm_active')}catch(e){}PMCUR=null;PMMENU=null;pmLeaveVideo();show('projects');pmRender()})}
 async function initProjects(){
  PM=window.AnimatoPM;PMS=PM.createProjectStore();
  PMDEFAULTS={form:pmForm(),sel:pmSel()};
@@ -6072,9 +6334,12 @@ async function initProjects(){
  ['input','change','click'].forEach(n=>document.addEventListener(n,e=>{if(!PMCUR||PMRESTORING)return;if(e.target&&e.target.closest&&e.target.closest('#projects'))return;pmSaveSoon()},true));
  setInterval(()=>{if(PMCUR&&!document.hidden&&!PMRESTORING)pmSaveSoon()},5000);
  document.addEventListener('visibilitychange',()=>{if(document.hidden&&PMCUR)pmSaveNow()});window.addEventListener('pagehide',()=>{if(PMCUR)pmSaveNow()});
+ /* leaving through the Tools button, switching apps, the phone sleeping or the tab being frozen: save right then, not after a wait */
+ ['beforeunload','freeze','blur'].forEach(n=>window.addEventListener(n,()=>{if(PMCUR&&!PMRESTORING)pmSaveNow()}));
+ try{if(window.ResizeObserver){let was=true;new ResizeObserver(()=>{const vis=document.documentElement.clientWidth>0&&document.documentElement.clientHeight>0;if(was&&!vis&&PMCUR&&!PMRESTORING)pmSaveNow();was=vis}).observe(document.documentElement)}}catch(e){}
  {const oa=pmEl('ownAudioFile');if(oa)oa.addEventListener('change',()=>{if(!PMCUR||PMRESTORING)return;const fs=[...(oa.files||[])];if(fs.length){PMAUDIO=fs;PMAUDIO_DIRTY=true;pmSaveSoon()}},true)}
  /* the voiceover clips are kept with the project so reopening gives the same video */
- {const o=openPlayerNow;openPlayerNow=function(r){try{if(PMCUR&&r){const a=Array.isArray(r.pendingAudioFiles)?r.pendingAudioFiles.slice():[];if(!PM.sameAudio(a,PMAUDIO)){PMAUDIO=a;PMAUDIO_DIRTY=true}pmSaveSoon()}}catch(e){}return o.apply(this,arguments)}}
+ {const o=openPlayerNow;openPlayerNow=function(r){try{if(PMCUR&&r){const a=Array.isArray(r.pendingAudioFiles)?r.pendingAudioFiles.slice():[];if(!PM.sameAudio(a,PMAUDIO)){PMAUDIO=a;PMAUDIO_DIRTY=true}pmSaveSoon();const id=PMCUR.id;setTimeout(()=>{if(PMCUR&&PMCUR.id===id&&PL&&!PMCUR.meta.thumb)pmSnap().then(()=>pmSaveSoon())},1800)}}catch(e){}return o.apply(this,arguments)}}
 }
 (function pmWait(){if(window.AnimatoPM)initProjects();else setTimeout(pmWait,40)})();
 </script><script>

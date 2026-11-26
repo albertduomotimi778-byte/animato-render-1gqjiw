@@ -83,7 +83,7 @@ export const EMOTIONS = Object.freeze({
   tired:        D({ b: 'sad',   m: 'flat',  x: 'chill',    s7: 'chill',     tilt: .35,  raise: -.3,  eye: .38,  smile: -.2,  mf: 'flat', gy: .6, ek: 'lid' }),
   bored:        D({ b: 'calm',  m: 'flat',  x: 'chill',    s7: 'chill',     tilt: 0,    raise: -.2,  eye: .5,   smile: -.15, mf: 'flat', gx: -.6, ek: 'lid' }),
   deadpan:      D({ b: 'calm',  m: 'flat',  x: 'cool',     s7: 'cool',      tilt: 0,    raise: 0,    eye: .8,   smile: 0,    mf: 'flat', ek: 'lid' }),
-  pain:         D({ b: 'sad',   m: 'open',  x: 'sad',      s7: 'shy',       tilt: .8,   raise: -.1,  eye: .22,  smile: -.7,  mf: 'tight', open: .25, ek: 'closed' }),
+  pain:         D({ b: 'sad',   m: 'frown',  x: 'sad',      s7: 'shy',       tilt: .8,   raise: -.1,  eye: .22,  smile: -.7,  mf: 'tight', open: .25, ek: 'closed', fx: ['sweat'] }),
 });
 
 /** The words the AI may write (neutral is the resting face and is also accepted, but is not advertised). */
@@ -247,6 +247,9 @@ export function lookWithFace(look, fa, style = '') {
 // ---------------------------------------------------------------------------------------------------------
 // [pattern, feeling, weight]
 const LEXICON = [
+  // THE SITUATION ITSELF (heat, fire, injury, cold, danger): a person walking through fire or baking in the sun is never smiling
+  [/\b(fire|flames?|on fire|burn(?:ing|ed|t|s)?|blaze|blazing|inferno|scorch\w*|lava|boiling|so hot|too hot|very hot|hot sun|scorching|heat ?wave|the heat|sweltering|sweat\w*|injur\w*|wound\w*|hurt(?:ing|s)?|bleed\w*|blood\w*|limp\w*|broke (?:his|her|my) \w+|punched|stabbed|shot (?:him|her|me)|bitten|stung|ouch|agony|in pain|painful|freezing|frozen|shiver\w*|frostbit\w*|thirst\w*|starv\w*|fever|vomit\w*|choking|drowning)\b/i, 'pain', 1.8],
+  [/\b(chas(?:ed|ing|es)|ran from|running from|run from|fled|fleeing|run away|ran away|ran for (?:his|her|their|my) life|barking|growl\w*|snarl\w*|roar\w*|hunted|ambush\w*|gun|knife|falling|fell off|ghost\w*|haunted|zombie\w*|creature|predator|earthquake|tsunami|flood\w*|explod\w*)\b/i, 'scared', 1.6],
   [/\b(suddenly|shock(?:ed|ing)?|stunned|gasp(?:ed)?|couldn'?t believe|unbelievable|out of nowhere|exploded|explosion|crash(?:ed)?|vanished|disappeared|impossible|breaking news|just then)\b/i, 'shocked', 1.4],
   [/\b(terrif\w*|scared|afraid|fear(?:ed)?|horror|panic\w*|danger\w*|threat\w*|chased|trapped|monster|deadly|nightmare|screamed|run for your life)\b/i, 'scared', 1.5],
   [/\b(worr\w*|trouble|problem|risk\w*|struggl\w*|doubt\w*|uncertain|anxious|nervous|deadline|running out|broke|debt|behind|failing|pressure|warning|crisis|bankrupt\w*|only \w+ days left|days left)\b/i, 'worried', 1.2],
@@ -299,7 +302,7 @@ export function detectEmotion(sentence) {
 
 /** Scene mood (the m: word of a beat) -> a background feeling. */
 const MOOD_FEEL = {
-  tense: ['worried', .8], dark: ['worried', .8], storm: ['scared', .7], cold: ['deadpan', .8], rain: ['sad', .65], night: ['calm', .8], warm: ['happy', .65],
+  tense: ['worried', .8], dark: ['worried', .8], storm: ['scared', .7], cold: ['deadpan', .8], rain: ['sad', .65], night: ['calm', .8], warm: ['calm', .6], fire: ['pain', 1], hot: ['pain', .9], danger: ['scared', .9], horror: ['scared', 1],
   hype: ['excited', .85], calm: ['calm', .8], space: ['awe', .8], city: null, sad: ['sad', .8], happy: ['happy', .8], scary: ['scared', .8], angry: ['angry', .8],
 };
 export function moodFeeling(mood) {
@@ -317,10 +320,10 @@ const LISTEN = {
 };
 
 /** Writes the feeling of every sentence onto the time it is spoken. [{t, emo, k}] or [] when the scene gives nothing. */
-export function trackFromNarration(narration, dur, mood) {
+export function trackFromNarration(narration, dur, mood, situation = null) {
   const total = Math.max(0.8, num(dur, 5));
   const sents = splitSentences(narration);
-  const base = moodFeeling(mood);
+  const base = situation || moodFeeling(mood);
   const segs = [];
   if (sents.length) {
     const words = sents.map((s) => Math.max(1, s.split(/\s+/).length));
@@ -348,6 +351,30 @@ export function trackFromNarration(narration, dur, mood) {
   return out.every((s) => s.emo === 'neutral') ? [] : out;
 }
 
+const POSITIVE = new Set(['happy', 'excited', 'laughing', 'proud', 'love', 'calm', 'relieved', 'hopeful', 'smug', 'scheming', 'awe', 'bored', 'neutral']);
+const NEGATIVE = new Set(['pain', 'scared', 'shocked', 'sad', 'crying', 'angry', 'furious', 'worried', 'disgusted']);
+const JOY = /\b(laugh\w*|smil\w*|grin\w*|happ\w*|joy\w*|celebrat\w*|cheer\w*|excit\w*|love[ds]?|proud|relie\w+|safe at last|enjoy\w*|fun|delight\w*|unbothered|calmly|didn'?t care|loved it)\b/i;
+/** What is happening in the scene, read from its set and the things drawn in it (a fire, a storm, a monster): {emo,k} or null. */
+export function situationOf(sc) {
+  if (!sc || typeof sc !== 'object') return null;
+  const bits = [];
+  if (typeof sc.background === 'string') bits.push(sc.background.slice(0, 4000));
+  if (Array.isArray(sc._things)) bits.push(sc._things.join(' '));
+  for (const p of sc.props || []) if (p && typeof p === 'object') { if (p._creature) bits.push('creature:' + p._creature + (p.follow ? ' chase' : '')); if (p._key) bits.push(String(p._key)); }
+  const s = bits.join(' ').toLowerCase();
+  const m = String(sc.mood || '').toLowerCase();
+  if (/\b(fire|flame|lava|inferno|burning|blaze|ember)/.test(s) || /fire|hot|lava/.test(m)) return { emo: 'pain', k: 1.15 };
+  if (/creature:(lion|tiger|wolf|bear|dog|crocodile|dinosaur|dragon|shark|snake|spider|leopard)[^ ]* chase/.test(s)) return { emo: 'scared', k: 1.2 };
+  if (/\b(monster|zombie|ghost|explosion)/.test(s)) return { emo: 'scared', k: 1.1 };
+  return null;
+}
+function sentenceTimes(narration, dur) {
+  const sents = splitSentences(narration), total = Math.max(.8, num(dur, 5));
+  const words = sents.map((x) => Math.max(1, x.split(/\s+/).length)), sum = words.reduce((a, b) => a + b, 0) || 1;
+  let acc = 0;
+  return sents.map((text, i) => { const t0 = (acc / sum) * total; acc += words[i]; return { text, t0: i === 0 ? 0 : t0 - .2, t1: i === sents.length - 1 ? total + 1 : (acc / sum) * total - .2 }; });
+}
+
 const isBackground = (c) => !c || c.far === true || num(c.par, 0) < 0 || num(c.scale, .85) < 0.5 || c.hidden === true;
 const isTalker = (c) => c && (c.talk === true || (Array.isArray(c.talk) && c.talk.length > 0));
 
@@ -359,7 +386,7 @@ const isTalker = (c) => c && (c.talk === true || (Array.isArray(c.talk) && c.tal
  *    the person simply keeps the resting face.
  */
 export function directFaces(SC, opts = {}) {
-  const res = { explicit: 0, auto: 0, dropped: 0 };
+  const res = { explicit: 0, auto: 0, dropped: 0, corrected: 0 };
   if (!Array.isArray(SC)) return res;
   const autoOn = opts.auto !== false;
   for (const sc of SC) {
@@ -375,7 +402,31 @@ export function directFaces(SC, opts = {}) {
     if (!autoOn) continue;
     const narration = sc.narration || sc.say || (Array.isArray(sc.captions) ? sc.captions.map((x) => (x && x.text) || '').join(' ') : '');
     const mood = sc.mood || sc.m || '';
-    const lead = trackFromNarration(narration, dur, mood);
+    const situ = situationOf(sc);
+    const lead = trackFromNarration(narration, dur, mood, situ);
+    // THE FACE MUST FIT THE SITUATION: a feeling the file wrote that contradicts what is happening (a smile while walking through fire,
+    // a happy face while being chased) is replaced by the situation's feeling, unless the words themselves say this person is happy
+    const sentences = sentenceTimes(narration, dur);
+    for (const c of chars) {
+      if (!(c._feelTrack && c._feelTrack.length) || isBackground(c)) continue;
+      const nm = String(c._who || (c.look && c.look.name) || '').toLowerCase();
+      const fixed = c._feelTrack.map((seg, i) => {
+        if (!POSITIVE.has(seg.emo)) return seg;
+        const end = i + 1 < c._feelTrack.length ? c._feelTrack[i + 1].t : dur;
+        const mid = (seg.t + Math.min(end, dur)) / 2;
+        const sent = sentences.find((x) => mid >= x.t0 && mid < x.t1) || sentences[sentences.length - 1] || null;
+        const f = sent ? detectEmotion(sent.text) : null;
+        const bad = f && NEGATIVE.has(f.emo) ? f : (situ && NEGATIVE.has(situ.emo) ? situ : null);
+        if (!bad) return seg;
+        const joy = sent && JOY.test(sent.text) && (!nm || sent.text.toLowerCase().indexOf(nm) >= 0 || chars.filter((x) => !isBackground(x)).length === 1);
+        if (joy) return seg;
+        const villain = seg.emo === 'smug' || seg.emo === 'scheming' || (seg.emo === 'laughing' && nm && sent && sent.text.toLowerCase().indexOf(nm) < 0);
+        if (villain) return seg;
+        res.corrected++;
+        return { ...seg, emo: bad.emo, k: Math.max(seg.k, bad.k) };
+      });
+      c._feelTrack = fixed;
+    }
     if (!lead.length) continue;
     const eligible = chars.filter((c) => !isBackground(c) && !(c._feelTrack && c._feelTrack.length) && !(c.hide === true));
     if (!eligible.length) continue;

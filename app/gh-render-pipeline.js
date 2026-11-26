@@ -16,7 +16,7 @@
  *
  * Bump PIPELINE_VERSION whenever any file below changes: the app then updates the person's repo by itself.
  */
-export const PIPELINE_VERSION = 2;
+export const PIPELINE_VERSION = 3;
 export const MAX_RUNS_PER_DAY = 3;
 export const MAX_SECONDS = 1800;
 
@@ -64,16 +64,19 @@ jobs:
           N=$(gh api "repos/@{{ github.repository }}/actions/workflows/render.yml/runs?created=%3E%3D$SINCE&per_page=100" --jq '.total_count')
           echo "runs in the last 24 hours: $N"
           if [ "$N" -gt ${MAX_RUNS_PER_DAY} ]; then echo "Daily limit reached"; exit 1; fi
+          SINCE5=$(date -u -d '4 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          M=$(gh api "repos/@{{ github.repository }}/actions/workflows/render.yml/runs?created=%3E%3D$SINCE5&per_page=100" --jq '.total_count')
+          if [ "$M" -gt 1 ]; then echo "Please wait a few minutes between renders"; exit 1; fi
       - id: plan
         run: node tools/plan.mjs jobdata/job/meta.json
 
   render:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     strategy:
       fail-fast: true
-      max-parallel: 6
+      max-parallel: 10
       matrix:
         part: @{{ fromJson(needs.plan.outputs.parts) }}
     steps:
@@ -87,8 +90,8 @@ jobs:
           node-version: 22
       - name: Install
         run: |
-          sudo apt-get update -y && sudo apt-get install -y ffmpeg
-          npm install --no-audit --no-fund
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          npm install --no-audit --no-fund --loglevel=error
       - name: Draw part @{{ matrix.part }}
         env:
           CHROME_PATH: /usr/bin/google-chrome
@@ -104,7 +107,7 @@ jobs:
   join:
     needs: render
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -203,6 +206,7 @@ const RENDER = String.raw`// node tools/render.mjs <jobdir> <outdir> <part>
 // Opens the app's engine in headless Chrome, draws this part's frames one by one and pipes them into ffmpeg.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import { serve } from './serve.mjs';
@@ -217,20 +221,27 @@ const { srv, port } = await serve(process.env.APP_DIR || 'app');
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', args: ['--no-sandbox', '--disable-gpu', '--force-color-profile=srgb'] });
 let ff = null;
 try {
-  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
-  page.on('pageerror', (e) => console.log('page error:', String(e).slice(0, 300)));
-  await page.goto('http://127.0.0.1:' + port + '/index.html?render=1', { waitUntil: 'load' });
-  await page.waitForFunction(() => !!window.__AnimatoRender, null, { timeout: 120000 });
-  const info = await page.evaluate((j) => window.__AnimatoRender.load(j), job);
+  // Several pages draw frames side by side (one per CPU core, at most 3): each page is its own process, so the cores all work.
+  const cores = Math.max(1, Math.min(3, Number(process.env.RENDER_PAGES) || (os.availableParallelism ? os.availableParallelism() : os.cpus().length)));
+  const open = async () => {
+    const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    page.on('pageerror', (e) => console.log('page error:', String(e).slice(0, 300)));
+    await page.goto('http://127.0.0.1:' + port + '/index.html?render=1', { waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__AnimatoRender, null, { timeout: 120000 });
+    const info = await page.evaluate((j) => window.__AnimatoRender.load(j), job);
+    return { page, info };
+  };
+  const pages = await Promise.all(Array.from({ length: cores }, open));
+  const info = pages[0].info;
   const N = info.frames, FPS = info.fps, parts = Math.max(1, Number(job.parts) || 1);
   const f0 = Math.floor(part * N / parts), f1 = part === parts - 1 ? N : Math.floor((part + 1) * N / parts);
-  console.log('part', part + 1, 'of', parts, 'frames', f0, 'to', f1, 'of', N, 'at', info.W + 'x' + info.H, FPS + 'fps');
+  console.log('part', part + 1, 'of', parts, 'frames', f0, 'to', f1, 'of', N, 'at', info.W + 'x' + info.H, FPS + 'fps', 'with', cores, 'page(s)');
   const out = path.join(outDir, 'part-' + part + '.mp4');   // plain file, only here on the runner
   ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-g', String(FPS * 2), '-an', out], { stdio: ['pipe', 'inherit', 'inherit'] });
   const done = new Promise((ok, bad) => { ff.on('close', (c) => (c === 0 ? ok() : bad(new Error('ffmpeg stopped with code ' + c)))); ff.on('error', bad); });
-  const grab = (i) => page.evaluate((n) => window.__AnimatoRender.frame(n), i);
-  const AHEAD = 4, q = [];
+  const grab = (i) => pages[(i - f0) % cores].page.evaluate((n) => window.__AnimatoRender.frame(n), i);
+  const AHEAD = 3 * cores, q = [];
   let next = f0;
   while (next < f1 && q.length < AHEAD) q.push(grab(next++));
   for (let i = f0; i < f1; i++) {
@@ -238,7 +249,7 @@ try {
     if (next < f1) q.push(grab(next++));
     const buf = Buffer.from(d.slice(d.indexOf(',') + 1), 'base64');
     if (!ff.stdin.write(buf)) await new Promise((r) => ff.stdin.once('drain', r));
-    if ((i - f0) % 300 === 0) console.log('frame', i, '/', f1);
+    if ((i - f0) % 600 === 0) console.log('frame', i, '/', f1);
   }
   ff.stdin.end();
   await done;
